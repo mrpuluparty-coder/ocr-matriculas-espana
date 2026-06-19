@@ -32,7 +32,7 @@ const env = {
   appSlug: "ocr-matriculas-espana",
   // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
   // Leave empty to use the default icon from assets/images/icon.png
-  logoUrl: "",
+  logoUrl: "https://d2xsxph8kpxj0f.cloudfront.net/310519663367952824/6nSuWvBbMoZtmiDXurz63s/icon-erCvjA4GJz4SbeQ8wjKb5b.png",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
   androidPackage: bundleId,
@@ -51,7 +51,9 @@ const config: ExpoConfig = {
     supportsTablet: true,
     bundleIdentifier: env.iosBundleId,
     "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Necesitamos acceso a tu cámara para capturar fotos de matrículas",
+        "NSPhotoLibraryUsageDescription": "Necesitamos acceso a tu galería para guardar las fotos capturadas"
       }
   },
   android: {
@@ -64,7 +66,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["POST_NOTIFICATIONS"],
+    permissions: ["POST_NOTIFICATIONS", "CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"],
     intentFilters: [
       {
         action: "VIEW",
@@ -112,11 +114,19 @@ const config: ExpoConfig = {
       },
     ],
     [
+      "expo-camera",
+      {
+        cameraPermission: "Necesitamos acceso a tu cámara para capturar fotos de matrículas",
+      },
+    ],
+    [
       "expo-build-properties",
       {
         android: {
           buildArchs: ["armeabi-v7a", "arm64-v8a"],
           minSdkVersion: 24,
+          compileSdkVersion: 34,
+          targetSdkVersion: 34,
         },
       },
     ],
