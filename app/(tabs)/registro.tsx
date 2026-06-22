@@ -29,7 +29,13 @@ export default function RegistroScreen() {
   const handleImportCSV = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'text/csv',
+        type: [
+          'text/csv',
+          'text/comma-separated-values',
+          'application/csv',
+          'application/vnd.ms-excel',
+          'text/plain' // Fallback para ciertos exploradores de archivos en Android
+        ],
         copyToCacheDirectory: true,
       });
 
