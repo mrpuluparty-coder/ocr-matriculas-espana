@@ -34,7 +34,7 @@ export default function RegistroScreen() {
           'text/comma-separated-values',
           'application/csv',
           'application/vnd.ms-excel',
-          'text/plain' // Fallback para ciertos exploradores de archivos en Android
+          'text/plain'
         ],
         copyToCacheDirectory: true,
       });
@@ -44,56 +44,47 @@ export default function RegistroScreen() {
         return;
       }
 
-      if (!result.assets || result.assets.length === 0) {
+      const selectedAsset = result.assets?.[0];
+      if (!selectedAsset) {
         Alert.alert('Error de importación', 'No se pudo acceder al archivo seleccionado.');
         return;
       }
 
-      const csvUri = result.assets[0].uri;
+      const csvUri = selectedAsset.uri;
+      
+      // PASO CRÍTICO DE SEGURIDAD: Copiar el archivo explícitamente al directorio local antes de leerlo
+      const localInternalUri = `${FileSystem.cacheDirectory}${selectedAsset.name || 'import_target.csv'}`;
+      await FileSystem.copyAsync({
+        from: csvUri,
+        to: localInternalUri
+      });
 
-      // Leer el archivo con codificación UTF-8 explícita
-      let csvContent: string;
-      try {
-        csvContent = await FileSystem.readAsStringAsync(csvUri, {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
-      } catch (readError) {
-        console.error('Error reading file with UTF8 encoding:', readError);
-        Alert.alert('Error de lectura', 'No se pudo leer el archivo. Intenta con otro archivo CSV.');
-        return;
-      }
+      // Leer desde la ruta local interna garantizada
+      const csvContent = await FileSystem.readAsStringAsync(localInternalUri, { 
+        encoding: FileSystem.EncodingType.UTF8 
+      });
 
       if (!csvContent || csvContent.trim().length === 0) {
         Alert.alert('Error de importación', 'El archivo CSV está vacío.');
         return;
       }
 
-      // Normalizar saltos de línea (soportar UNIX \n y Windows \r\n)
-      const normalizedContent = csvContent.replace(/\r\n/g, '\n');
-      const lines = normalizedContent.split('\n').filter(line => line.trim() !== '');
-
+      const lines = csvContent.replace(/\r\n/g, '\n').split('\n').filter(line => line.trim() !== '');
       if (lines.length < 2) {
         Alert.alert('Error de importación', 'El archivo CSV debe contener al menos un encabezado y una fila de datos.');
         return;
       }
 
       const uniquePlates = new Set<string>();
-
-      // Empezar en i = 1 para saltar el encabezado
+      
+      // Parseo seguro respetando que la MATRÍCULA está en la primera columna (índice 0)
       for (let i = 1; i < lines.length; i++) {
-        try {
-          const columns = lines[i].split(',');
-          if (columns.length > 0) {
-            // Extraer la matrícula de la primera columna y limpiar comillas
-            const plate = columns[0].replace(/"/g, '').trim().toUpperCase();
-            if (plate && plate.length > 0) {
-              uniquePlates.add(plate);
-            }
+        const columns = lines[i].split(',');
+        if (columns.length > 0) {
+          const plate = columns[0].replace(/"/g, '').trim().toUpperCase();
+          if (plate) {
+            uniquePlates.add(plate);
           }
-        } catch (lineError) {
-          console.warn(`Error parsing line ${i}:`, lineError);
-          // Continuar con la siguiente línea en caso de error
-          continue;
         }
       }
 
@@ -105,14 +96,19 @@ export default function RegistroScreen() {
       const platesArray = Array.from(uniquePlates);
       await AsyncStorage.setItem(IMPORTED_PLATES_STORAGE_KEY, JSON.stringify(platesArray));
       setImportedPlatesCount(platesArray.length);
-      Alert.alert('Importación exitosa', `${platesArray.length} matrículas importadas y guardadas correctamente.`);
+      
+      // Limpieza opcional del archivo temporal
+      try {
+        await FileSystem.deleteAsync(localInternalUri, { idempotent: true });
+      } catch (e) {
+        console.log('Error al limpiar caché temporal:', e);
+      }
+
+      Alert.alert('Importación exitosa', `${platesArray.length} matrículas importadas y guardadas.`);
 
     } catch (error) {
-      console.error('Error importing CSV:', error);
-      Alert.alert(
-        'Error de importación',
-        'No se pudo importar el archivo CSV. Asegúrate de que sea un archivo CSV válido con la estructura correcta (MATRÍCULA,FECHA,HORA,LATITUD/LONGITUD,LUGAR).'
-      );
+      console.error('Error nativo leyendo CSV:', error);
+      Alert.alert('Error de lectura', 'No se pudo leer el archivo debido a restricciones del sistema. Intenta de nuevo.');
     }
   };
 
