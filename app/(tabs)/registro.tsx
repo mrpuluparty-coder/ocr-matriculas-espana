@@ -50,16 +50,20 @@ export default function RegistroScreen() {
         return;
       }
 
-      const csvUri = selectedAsset.uri;
-      
-      // PASO CRÍTICO DE SEGURIDAD: Copiar el archivo explícitamente al directorio local antes de leerlo
-      const localInternalUri = `${FileSystem.cacheDirectory}${selectedAsset.name || 'import_target.csv'}`;
+      const csvUri = decodeURIComponent(selectedAsset.uri);
+      const localInternalUri = `${FileSystem.cacheDirectory}temp_import.csv`;
+
+      try {
+        await FileSystem.deleteAsync(localInternalUri, { idempotent: true });
+      } catch (e) {
+        console.log('Sin archivo previo que limpiar');
+      }
+
       await FileSystem.copyAsync({
         from: csvUri,
         to: localInternalUri
       });
 
-      // Leer desde la ruta local interna garantizada
       const csvContent = await FileSystem.readAsStringAsync(localInternalUri, { 
         encoding: FileSystem.EncodingType.UTF8 
       });
@@ -77,7 +81,6 @@ export default function RegistroScreen() {
 
       const uniquePlates = new Set<string>();
       
-      // Parseo seguro respetando que la MATRÍCULA está en la primera columna (índice 0)
       for (let i = 1; i < lines.length; i++) {
         const columns = lines[i].split(',');
         if (columns.length > 0) {
@@ -97,7 +100,6 @@ export default function RegistroScreen() {
       await AsyncStorage.setItem(IMPORTED_PLATES_STORAGE_KEY, JSON.stringify(platesArray));
       setImportedPlatesCount(platesArray.length);
       
-      // Limpieza opcional del archivo temporal
       try {
         await FileSystem.deleteAsync(localInternalUri, { idempotent: true });
       } catch (e) {
