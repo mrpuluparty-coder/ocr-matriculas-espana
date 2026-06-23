@@ -50,20 +50,24 @@ export default function RegistroScreen() {
         return;
       }
 
-      const csvUri = decodeURIComponent(selectedAsset.uri);
+      // Usar la URI nativa sin decodificar para que la capa nativa del sistema operativo resuelva correctamente los permisos
+      const csvUri = selectedAsset.uri;
       const localInternalUri = `${FileSystem.cacheDirectory}temp_import.csv`;
 
+      // Limpiar residuos previos si existen
       try {
         await FileSystem.deleteAsync(localInternalUri, { idempotent: true });
       } catch (e) {
         console.log('Sin archivo previo que limpiar');
       }
 
+      // Copiar desde la URI nativa segura hacia nuestro caché local interno plano
       await FileSystem.copyAsync({
         from: csvUri,
         to: localInternalUri
       });
 
+      // Leer el archivo desde la ruta interna de la app que ya no tiene restricciones
       const csvContent = await FileSystem.readAsStringAsync(localInternalUri, { 
         encoding: FileSystem.EncodingType.UTF8 
       });
@@ -81,6 +85,7 @@ export default function RegistroScreen() {
 
       const uniquePlates = new Set<string>();
       
+      // Parseo seguro: Matrícula en primera columna (índice 0)
       for (let i = 1; i < lines.length; i++) {
         const columns = lines[i].split(',');
         if (columns.length > 0) {
@@ -100,6 +105,7 @@ export default function RegistroScreen() {
       await AsyncStorage.setItem(IMPORTED_PLATES_STORAGE_KEY, JSON.stringify(platesArray));
       setImportedPlatesCount(platesArray.length);
       
+      // Limpieza del archivo temporal
       try {
         await FileSystem.deleteAsync(localInternalUri, { idempotent: true });
       } catch (e) {
