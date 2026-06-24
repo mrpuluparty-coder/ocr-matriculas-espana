@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ScrollView } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ScreenContainer } from "@/components/screen-container";
+import { ScreenContainer } from '@/components/screen-container';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
 
 export default function RegistroScreen() {
-  const [importedPlatesCount, setImportedPlatesCount] = useState<number>(0);
+  const [importedPlatesCount, setImportedPlatesCount] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     loadImportedPlatesCount();
@@ -16,10 +16,10 @@ export default function RegistroScreen() {
 
   const loadImportedPlatesCount = async () => {
     try {
-      const storedPlates = await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY);
-      if (storedPlates) {
-        const platesArray = JSON.parse(storedPlates);
-        setImportedPlatesCount(platesArray.length);
+      const stored = await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY);
+      if (stored) {
+        const plates = JSON.parse(stored);
+        setImportedPlatesCount(plates.length);
       }
     } catch (error) {
       console.error('Error loading imported plates count:', error);
@@ -28,6 +28,7 @@ export default function RegistroScreen() {
 
   const handleImportCSV = async () => {
     try {
+      setIsLoading(true);
       const result = await DocumentPicker.getDocumentAsync({
         type: [
           'text/csv',
@@ -41,82 +42,79 @@ export default function RegistroScreen() {
 
       if (result.canceled) {
         Alert.alert('Importación cancelada', 'No se seleccionó ningún archivo CSV.');
+        setIsLoading(false);
         return;
       }
 
       const selectedAsset = result.assets?.[0];
       if (!selectedAsset) {
         Alert.alert('Error de importación', 'No se pudo acceder al archivo seleccionado.');
+        setIsLoading(false);
         return;
       }
 
-      // Usar la URI nativa sin decodificar para que la capa nativa del sistema operativo resuelva correctamente los permisos
-      const csvUri = selectedAsset.uri;
-      const localInternalUri = `${FileSystem.cacheDirectory}temp_import.csv`;
+      // Usar fetch + FileReader para leer el archivo desde la URI virtual sin restricciones de Scoped Storage
+      const response = await fetch(selectedAsset.uri);
+      const blob = await response.blob();
 
-      // Limpiar residuos previos si existen
-      try {
-        await FileSystem.deleteAsync(localInternalUri, { idempotent: true });
-      } catch (e) {
-        console.log('Sin archivo previo que limpiar');
-      }
-
-      // Copiar desde la URI nativa segura hacia nuestro caché local interno plano
-      await FileSystem.copyAsync({
-        from: csvUri,
-        to: localInternalUri
-      });
-
-      // Leer el archivo desde la ruta interna de la app que ya no tiene restricciones
-      const csvContent = await FileSystem.readAsStringAsync(localInternalUri, { 
-        encoding: FileSystem.EncodingType.UTF8 
-      });
-
-      if (!csvContent || csvContent.trim().length === 0) {
-        Alert.alert('Error de importación', 'El archivo CSV está vacío.');
-        return;
-      }
-
-      const lines = csvContent.replace(/\r\n/g, '\n').split('\n').filter(line => line.trim() !== '');
-      if (lines.length < 2) {
-        Alert.alert('Error de importación', 'El archivo CSV debe contener al menos un encabezado y una fila de datos.');
-        return;
-      }
-
-      const uniquePlates = new Set<string>();
-      
-      // Parseo seguro: Matrícula en primera columna (índice 0)
-      for (let i = 1; i < lines.length; i++) {
-        const columns = lines[i].split(',');
-        if (columns.length > 0) {
-          const plate = columns[0].replace(/"/g, '').trim().toUpperCase();
-          if (plate) {
-            uniquePlates.add(plate);
+      const reader = new FileReader();
+      reader.onload = async (e: any) => {
+        try {
+          const csvContent = e.target.result;
+          if (!csvContent || csvContent.trim().length === 0) {
+            Alert.alert('Error de importación', 'El archivo seleccionado está vacío.');
+            setIsLoading(false);
+            return;
           }
+
+          // Proceder al parseo seguro de las líneas
+          const lines = csvContent.replace(/\r\n/g, '\n').split('\n').filter((line: string) => line.trim() !== '');
+          if (lines.length < 2) {
+            Alert.alert('Error de importación', 'El archivo debe contener un encabezado y al menos una fila de datos.');
+            setIsLoading(false);
+            return;
+          }
+
+          const uniquePlates = new Set<string>();
+          // Parsear líneas saltando el encabezado (índice 0). La matrícula está en la primera columna antes de cualquier coma.
+          for (let i = 1; i < lines.length; i++) {
+            const columns = lines[i].split(',');
+            if (columns.length > 0) {
+              const plate = columns[0].replace(/"/g, '').trim().toUpperCase();
+              if (plate) {
+                uniquePlates.add(plate);
+              }
+            }
+          }
+
+          if (uniquePlates.size === 0) {
+            Alert.alert('Advertencia', 'No se encontraron matrículas con formato válido en el archivo.');
+            setIsLoading(false);
+            return;
+          }
+
+          const platesArray = Array.from(uniquePlates);
+          await AsyncStorage.setItem(IMPORTED_PLATES_STORAGE_KEY, JSON.stringify(platesArray));
+          setImportedPlatesCount(platesArray.length);
+          Alert.alert('Importación exitosa', `${platesArray.length} matrículas importadas y guardadas correctamente.`);
+          setIsLoading(false);
+        } catch (error) {
+          console.error('Error procesando archivo:', error);
+          Alert.alert('Error de procesamiento', 'Ocurrió un error al procesar el archivo.');
+          setIsLoading(false);
         }
-      }
+      };
 
-      if (uniquePlates.size === 0) {
-        Alert.alert('Advertencia', 'No se encontraron matrículas válidas en el archivo CSV.');
-        return;
-      }
+      reader.onerror = () => {
+        Alert.alert('Error de lectura', 'El lector en memoria no pudo procesar el archivo.');
+        setIsLoading(false);
+      };
 
-      const platesArray = Array.from(uniquePlates);
-      await AsyncStorage.setItem(IMPORTED_PLATES_STORAGE_KEY, JSON.stringify(platesArray));
-      setImportedPlatesCount(platesArray.length);
-      
-      // Limpieza del archivo temporal
-      try {
-        await FileSystem.deleteAsync(localInternalUri, { idempotent: true });
-      } catch (e) {
-        console.log('Error al limpiar caché temporal:', e);
-      }
-
-      Alert.alert('Importación exitosa', `${platesArray.length} matrículas importadas y guardadas.`);
-
+      reader.readAsText(blob, 'UTF-8');
     } catch (error) {
-      console.error('Error nativo leyendo CSV:', error);
-      Alert.alert('Error de lectura', 'No se pudo leer el archivo debido a restricciones del sistema. Intenta de nuevo.');
+      console.error('Error importando CSV:', error);
+      Alert.alert('Error de importación', 'No se pudo importar el archivo. Intenta de nuevo.');
+      setIsLoading(false);
     }
   };
 
@@ -127,14 +125,14 @@ export default function RegistroScreen() {
       [
         { text: 'Cancelar', onPress: () => {}, style: 'cancel' },
         {
-          text: 'Eliminar',
+          text: 'Limpiar',
           onPress: async () => {
             try {
               await AsyncStorage.removeItem(IMPORTED_PLATES_STORAGE_KEY);
               setImportedPlatesCount(0);
-              Alert.alert('Éxito', 'El registro de matrículas ha sido eliminado.');
+              Alert.alert('Registro limpiado', 'Todas las matrículas importadas han sido eliminadas.');
             } catch (error) {
-              console.error('Error clearing registry:', error);
+              console.error('Error limpiando registro:', error);
               Alert.alert('Error', 'No se pudo limpiar el registro.');
             }
           },
@@ -145,39 +143,61 @@ export default function RegistroScreen() {
   };
 
   return (
-    <ScreenContainer className="p-6">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View className="flex-1 items-center justify-center gap-8">
-          <Text className="text-3xl font-bold text-foreground">Registro de Matrículas</Text>
-          <Text className="text-base text-muted text-center">
-            Importa un archivo CSV con matrículas para cotejar durante el escaneo.
-          </Text>
-
-          <TouchableOpacity
-            className="bg-primary px-6 py-3 rounded-full active:opacity-80"
-            onPress={handleImportCSV}
-          >
-            <Text className="text-background font-semibold">Importar CSV</Text>
-          </TouchableOpacity>
-
-          <View className="items-center gap-4">
-            <Text className="text-lg text-foreground font-semibold">
-              Matrículas importadas: {importedPlatesCount}
+    <ScreenContainer className="bg-background">
+      <ScrollView contentContainerStyle={{ flexGrow: 1 }} className="p-4">
+        <View className="gap-6">
+          {/* Header */}
+          <View className="items-center gap-2">
+            <Text className="text-3xl font-bold text-foreground">Registro de Matrículas</Text>
+            <Text className="text-sm text-muted text-center">
+              Importa un archivo CSV con matrículas para cotejar durante el escaneo
             </Text>
-            {importedPlatesCount > 0 && (
-              <TouchableOpacity
-                className="bg-error px-6 py-2 rounded-full active:opacity-80"
-                onPress={handleClearRegistry}
-              >
-                <Text className="text-background font-semibold text-sm">Limpiar registro</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
-          <View className="mt-8 p-4 bg-surface rounded-lg">
-            <Text className="text-sm text-muted text-center">
-              El archivo CSV debe tener la siguiente estructura:{'\n'}
-              MATRÍCULA,FECHA,HORA,LATITUD/LONGITUD,LUGAR
+          {/* Status Card */}
+          <View className="bg-surface rounded-2xl p-6 border border-border gap-3">
+            <Text className="text-sm text-muted">Matrículas importadas</Text>
+            <Text className="text-4xl font-bold text-primary">{importedPlatesCount}</Text>
+            <Text className="text-xs text-muted">
+              {importedPlatesCount === 0
+                ? 'No hay matrículas importadas'
+                : `${importedPlatesCount} matrículas en el registro`}
+            </Text>
+          </View>
+
+          {/* Import Button */}
+          <TouchableOpacity
+            onPress={handleImportCSV}
+            disabled={isLoading}
+            className="bg-primary rounded-xl py-4 px-6 items-center active:opacity-80"
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text className="text-white font-semibold text-base">Importar CSV</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Clear Button */}
+          {importedPlatesCount > 0 && (
+            <TouchableOpacity
+              onPress={handleClearRegistry}
+              className="bg-error/10 rounded-xl py-4 px-6 items-center border border-error active:opacity-80"
+            >
+              <Text className="text-error font-semibold text-base">Limpiar Registro</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Info Section */}
+          <View className="bg-surface rounded-2xl p-6 border border-border gap-3">
+            <Text className="text-sm font-semibold text-foreground">Formato esperado del CSV</Text>
+            <Text className="text-xs text-muted leading-relaxed">
+              El archivo debe contener 5 columnas:{'\n'}
+              • Matrícula{'\n'}
+              • Fecha{'\n'}
+              • Hora{'\n'}
+              • Coordenadas (Lat/Lon){'\n'}
+              • Lugar
             </Text>
           </View>
         </View>
@@ -185,7 +205,3 @@ export default function RegistroScreen() {
     </ScreenContainer>
   );
 }
-
-const styles = StyleSheet.create({
-  // Estilos específicos si es necesario
-});
