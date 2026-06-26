@@ -1,33 +1,44 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Platform, ScrollView } from 'react-native';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import { File, Paths } from 'expo-file-system';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScreenContainer } from "@/components/screen-container";
-import { playSound } from '@/lib/utils/audio';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
-const PLATES_FILE_NAME = 'matriculas_detectadas.csv'; // Cambiado a CSV para el nuevo formato
+const PLATES_FILE_NAME = 'matriculas_detectadas.csv';
 
 const getPlatesFile = () => new File(Paths.document, PLATES_FILE_NAME);
 
-const ALERT_SOUND = require('@/assets/sounds/alert.mp3'); // Asume que tienes un sonido de alerta
+interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'warning' | 'error';
+}
+
+interface ScannedPlateItem {
+  plate: string;
+  isInRegistry: boolean;
+}
 
 export default function HomeScreen() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
-  const [scannedPlates, setScannedPlates] = useState<string[]>([]);
+  const [scannedPlates, setScannedPlates] = useState<ScannedPlateItem[]>([]);
   const [cameraReady, setCameraReady] = useState(false);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
   const [importedPlates, setImportedPlates] = useState<string[]>([]);
+  const [toast, setToast] = useState<Toast | null>(null);
 
   const cameraRef = useRef<CameraView>(null);
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Request camera permissions
   useEffect(() => {
@@ -52,17 +63,12 @@ export default function HomeScreen() {
       locationSubscription.current = await Location.watchPositionAsync(
         {
           accuracy: Location.LocationAccuracy.Highest,
-          timeInterval: 1000, // Update every 1 second
-          distanceInterval: 1, // Update every 1 meter
+          timeInterval: 1000,
+          distanceInterval: 1,
         },
         (newLocation) => {
           setLocation(newLocation);
         }
-      );
-    } else {
-      Alert.alert(
-        'Permiso de ubicación denegado',
-        'Necesitamos acceso a tu ubicación para registrar las matrículas con coordenadas.'
       );
     }
   }, []);
@@ -87,10 +93,13 @@ export default function HomeScreen() {
       const fileInfo = await platesFile.info();
       if (fileInfo.exists) {
         const content = await platesFile.text();
-        // Asumiendo que el archivo ahora es CSV y queremos mostrar solo la matrícula
         const lines = content.split('\n').filter(Boolean);
-        const platesOnly = lines.slice(1).map(line => line.split(',')[0]); // Ignorar encabezado y tomar solo la matrícula
-        setScannedPlates(platesOnly);
+        const platesData = lines.slice(1).map(line => {
+          const plate = line.split(',')[0];
+          return { plate, isInRegistry: importedPlates.includes(plate) };
+        });
+        // Invertir el orden para mostrar primero la última detectada
+        setScannedPlates(platesData.reverse());
       }
     } catch (error) {
       console.error('Error loading scanned plates:', error);
@@ -108,14 +117,29 @@ export default function HomeScreen() {
     }
   };
 
+  const showToast = (message: string, type: 'success' | 'warning' | 'error') => {
+    // Limpiar timeout anterior si existe
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+
+    const toastId = Date.now().toString();
+    setToast({ id: toastId, message, type });
+
+    // Auto-desaparecer después de 1 segundo
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+    }, 1000);
+  };
+
   const savePlate = async (plate: string, isMatch: boolean) => {
     try {
       const platesFile = getPlatesFile();
       const now = new Date();
-      const date = now.toLocaleDateString('es-ES'); // Formato DD/MM/YYYY
-      const time = now.toLocaleTimeString('es-ES', { hour12: false }); // Formato HH:MM:SS
+      const date = now.toLocaleDateString('es-ES');
+      const time = now.toLocaleTimeString('es-ES', { hour12: false });
       const latLong = location ? `${location.coords.latitude},${location.coords.longitude}` : 'N/A,N/A';
-      const place = isMatch ? 'DF' : 'AC'; // Ejemplo: 'DF' si coincide, 'AC' si no
+      const place = isMatch ? 'DF' : 'AC';
 
       const entry = `${plate},${date},${time},${latLong},${place}\n`;
 
@@ -124,16 +148,15 @@ export default function HomeScreen() {
       if (fileInfo.exists) {
         currentContent = await platesFile.text();
       } else {
-        // Si el archivo no existe, añadir el encabezado CSV
         await platesFile.create();
         currentContent = 'MATRÍCULA,FECHA,HORA,LATITUD/LONGITUD,LUGAR\n';
       }
       const newContent = currentContent + entry;
       await platesFile.write(newContent);
-      loadScannedPlates(); // Recargar para actualizar UI
+      loadScannedPlates();
     } catch (error) {
       console.error('Error saving plate:', error);
-      Alert.alert('Error', 'No se pudo guardar la matrícula.');
+      showToast('Error al guardar matrícula', 'error');
     }
   };
 
@@ -148,7 +171,6 @@ export default function HomeScreen() {
 
         if (photo.uri) {
           const result = await TextRecognition.recognize(photo.uri);
-          console.log('OCR Result:', result.text);
 
           const cleanText = result.text.replace(/[^A-Z0-9]/gi, '').toUpperCase();
           const plateRegex = /\d{4}[B-DF-HJ-NP-TV-Z]{3}/;
@@ -160,25 +182,28 @@ export default function HomeScreen() {
 
             if (isMatch) {
               setFrameColor('red');
-              playSound(ALERT_SOUND);
-              setTimeout(() => setFrameColor('blue'), 500); // Vuelve a azul después de 0.5s
-              Alert.alert('¡Matrícula Encontrada!', `La matrícula ${detectedPlate} está en el registro.`);
+              // Vibración en detección de matrícula en registro
+              if (Platform.OS !== 'web') {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              }
+              showToast(`¡${detectedPlate} en registro!`, 'warning');
+              setTimeout(() => setFrameColor('blue'), 500);
             } else {
-              Alert.alert('Matrícula detectada', detectedPlate);
+              showToast(`${detectedPlate} detectada`, 'success');
             }
             savePlate(detectedPlate, isMatch);
           } else {
-            Alert.alert('No se detectó matrícula', 'No se encontró una matrícula española válida.');
+            showToast('No se detectó matrícula válida', 'error');
           }
         }
       } catch (error) {
         console.error('Error during scan:', error);
-        Alert.alert('Error', 'Ocurrió un error al escanear la matrícula.');
+        showToast('Error al escanear', 'error');
       }
     } else if (!hasLocationPermission) {
-      Alert.alert('Permiso de ubicación requerido', 'Por favor, concede permisos de ubicación para escanear matrículas.');
+      showToast('Permiso de ubicación requerido', 'error');
     } else {
-      Alert.alert('Cámara no lista', 'La cámara no está lista o no tiene permisos.');
+      showToast('Cámara no lista', 'error');
     }
   };
 
@@ -192,16 +217,41 @@ export default function HomeScreen() {
     return <ScreenContainer className="flex-1 items-center justify-center"><Text>Acceso a la ubicación denegado.</Text></ScreenContainer>;
   }
 
+  const getToastBackgroundColor = (type: string) => {
+    switch (type) {
+      case 'success':
+        return '#808080'; // Gris
+      case 'warning':
+        return '#FF9500'; // Naranja
+      case 'error':
+        return '#FF3B30'; // Rojo
+      default:
+        return '#808080';
+    }
+  };
+
   return (
     <ScreenContainer className="flex-1 p-0">
       <CameraView
         ref={cameraRef}
-        style={StyleSheet.absoluteFillObject}
+        style={[StyleSheet.absoluteFillObject, { transform: [{ scale: 1.5 }] }]}
         onCameraReady={() => setCameraReady(true)}
         facing="back"
       />
       {/* Marco de enfoque centrado */}
       <View style={[styles.focusFrame, { borderColor: frameColor }]} />
+
+      {/* Toast flotante */}
+      {toast && (
+        <View
+          style={[
+            styles.toast,
+            { backgroundColor: getToastBackgroundColor(toast.type) }
+          ]}
+        >
+          <Text style={styles.toastText}>{toast.message}</Text>
+        </View>
+      )}
 
       <View style={styles.overlay}>
         <TouchableOpacity
@@ -216,10 +266,18 @@ export default function HomeScreen() {
           <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
           <ScrollView style={styles.platesScrollView}>
             {scannedPlates.length > 0 ? (
-              scannedPlates.map((plate, index) => (
-                <Text key={index} style={styles.plateText}>
-                  {plate}
-                </Text>
+              scannedPlates.map((item, index) => (
+                <View key={index} style={styles.plateRow}>
+                  {item.isInRegistry && <Text style={styles.plateBullet}>●</Text>}
+                  <Text
+                    style={[
+                      styles.plateText,
+                      item.isInRegistry && styles.plateTextInRegistry
+                    ]}
+                  >
+                    {item.plate}
+                  </Text>
+                </View>
               ))
             ) : (
               <Text style={styles.plateText}>Ninguna matrícula detectada aún.</Text>
@@ -255,7 +313,7 @@ const styles = StyleSheet.create({
   platesContainer: {
     backgroundColor: 'rgba(0,0,0,0.7)',
     width: '90%',
-    maxHeight: 100, // Ajustado para mostrar aproximadamente 4 líneas de texto
+    maxHeight: 100,
     borderRadius: 10,
     padding: 10,
   },
@@ -268,10 +326,24 @@ const styles = StyleSheet.create({
   platesScrollView: {
     flexGrow: 0,
   },
+  plateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  plateBullet: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginRight: 6,
+    fontWeight: 'bold',
+  },
   plateText: {
     color: 'white',
     fontSize: 14,
-    marginBottom: 2,
+  },
+  plateTextInRegistry: {
+    color: '#FF3B30',
+    fontWeight: 'bold',
   },
   focusFrame: {
     position: 'absolute',
@@ -279,10 +351,26 @@ const styles = StyleSheet.create({
     left: '50%',
     width: 250,
     height: 100,
-    marginTop: -50, // Centrar verticalmente
-    marginLeft: -125, // Centrar horizontalmente
+    marginTop: -50,
+    marginLeft: -125,
     borderWidth: 3,
     borderRadius: 5,
-    zIndex: 1, // Asegurarse de que esté por encima de la cámara
+    zIndex: 1,
+  },
+  toast: {
+    position: 'absolute',
+    top: 50,
+    left: '10%',
+    right: '10%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    zIndex: 100,
+    alignItems: 'center',
+  },
+  toastText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
