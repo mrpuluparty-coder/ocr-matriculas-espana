@@ -106,6 +106,17 @@ export default function HomeScreen() {
     }
   };
 
+  // Recargar estilos cuando cambian las matrículas importadas
+  useEffect(() => {
+    if (scannedPlates.length > 0) {
+      const updatedPlates = scannedPlates.map(item => ({
+        ...item,
+        isInRegistry: importedPlates.includes(item.plate)
+      }));
+      setScannedPlates(updatedPlates);
+    }
+  }, [importedPlates]);
+
   const loadImportedPlates = async () => {
     try {
       const storedPlates = await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY);
@@ -234,7 +245,7 @@ export default function HomeScreen() {
     <ScreenContainer className="flex-1 p-0">
       <CameraView
         ref={cameraRef}
-        style={[StyleSheet.absoluteFillObject, { transform: [{ scale: 1.5 }] }]}
+        style={[StyleSheet.absoluteFillObject, { transform: [{ scale: 2 }] }]}
         onCameraReady={() => setCameraReady(true)}
         facing="back"
       />
@@ -263,21 +274,26 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         <View style={styles.platesContainer}>
-          <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
+          <View style={styles.platesHeader}>
+            <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
+            {scannedPlates.length > 0 && (
+              <TouchableOpacity onPress={() => setScannedPlates([])}>
+                <Text style={styles.clearButtonText}>×</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <ScrollView style={styles.platesScrollView}>
             {scannedPlates.length > 0 ? (
               scannedPlates.map((item, index) => (
-                <View key={index} style={styles.plateRow}>
-                  {item.isInRegistry && <Text style={styles.plateBullet}>●</Text>}
-                  <Text
-                    style={[
-                      styles.plateText,
-                      item.isInRegistry && styles.plateTextInRegistry
-                    ]}
-                  >
-                    {item.plate}
-                  </Text>
-                </View>
+                <Text
+                  key={index}
+                  style={[
+                    styles.plateText,
+                    item.isInRegistry && styles.plateTextInRegistry
+                  ]}
+                >
+                  {item.plate}
+                </Text>
               ))
             ) : (
               <Text style={styles.plateText}>Ninguna matrícula detectada aún.</Text>
@@ -317,26 +333,27 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 10,
   },
+  platesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
   platesTitle: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
-    marginBottom: 5,
+  },
+  clearButtonText: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+    padding: 4,
   },
   platesScrollView: {
     flexGrow: 0,
   },
-  plateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  plateBullet: {
-    color: '#FF3B30',
-    fontSize: 12,
-    marginRight: 6,
-    fontWeight: 'bold',
-  },
+
   plateText: {
     color: 'white',
     fontSize: 14,

@@ -1,10 +1,15 @@
 import React, { useEffect, useState } from 'react';
+import * as FileSystem from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import { View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScreenContainer } from '@/components/screen-container';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
+const PLATES_FILE_NAME = 'matriculas_detectadas.csv';
+
+const getPlatesFile = () => new File(Paths.document, PLATES_FILE_NAME);
 
 export default function RegistroScreen() {
   const [importedPlatesCount, setImportedPlatesCount] = useState(0);
@@ -120,7 +125,7 @@ export default function RegistroScreen() {
 
   const handleClearRegistry = async () => {
     Alert.alert(
-      'Limpiar registro',
+      'Limpiar registros CSV',
       '¿Estás seguro de que deseas eliminar todas las matrículas importadas?',
       [
         { text: 'Cancelar', onPress: () => {}, style: 'cancel' },
@@ -130,10 +135,38 @@ export default function RegistroScreen() {
             try {
               await AsyncStorage.removeItem(IMPORTED_PLATES_STORAGE_KEY);
               setImportedPlatesCount(0);
-              Alert.alert('Registro limpiado', 'Todas las matrículas importadas han sido eliminadas.');
+              Alert.alert('Registros CSV limpiados', 'Todas las matrículas importadas han sido eliminadas.');
             } catch (error) {
               console.error('Error limpiando registro:', error);
               Alert.alert('Error', 'No se pudo limpiar el registro.');
+            }
+          },
+          style: 'destructive',
+        },
+      ]
+    );
+  };
+
+  const handleDeleteOCRRecords = async () => {
+    Alert.alert(
+      'Eliminar registros OCR',
+      '¿Estás seguro de que deseas eliminar todos los registros de detecciones de matrículas?',
+      [
+        { text: 'Cancelar', onPress: () => {}, style: 'cancel' },
+        {
+          text: 'Eliminar',
+          onPress: async () => {
+            try {
+              const platesFile = getPlatesFile();
+              const fileInfo = await platesFile.info();
+              if (fileInfo.exists) {
+                // Crear archivo nuevo solo con el encabezado
+                await platesFile.write('MATRÍCULA,FECHA,HORA,LATITUD/LONGITUD,LUGAR\n');
+                Alert.alert('Registros eliminados', 'Todos los registros OCR han sido eliminados.');
+              }
+            } catch (error) {
+              console.error('Error eliminando registros OCR:', error);
+              Alert.alert('Error', 'No se pudieron eliminar los registros OCR.');
             }
           },
           style: 'destructive',
@@ -178,15 +211,23 @@ export default function RegistroScreen() {
             )}
           </TouchableOpacity>
 
-          {/* Clear Button */}
+          {/* Clear CSV Button */}
           {importedPlatesCount > 0 && (
             <TouchableOpacity
               onPress={handleClearRegistry}
               className="bg-error/10 rounded-xl py-4 px-6 items-center border border-error active:opacity-80"
             >
-              <Text className="text-error font-semibold text-base">Limpiar Registro</Text>
+              <Text className="text-error font-semibold text-base">Limpiar Registros CSV</Text>
             </TouchableOpacity>
           )}
+
+          {/* Delete OCR Records Button */}
+          <TouchableOpacity
+            onPress={handleDeleteOCRRecords}
+            className="bg-warning/10 rounded-xl py-4 px-6 items-center border border-warning active:opacity-80"
+          >
+            <Text className="text-warning font-semibold text-base">Eliminar Registros OCR</Text>
+          </TouchableOpacity>
 
           {/* Info Section */}
           <View className="bg-surface rounded-2xl p-6 border border-border gap-3">
