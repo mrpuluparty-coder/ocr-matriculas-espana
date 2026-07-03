@@ -44,7 +44,6 @@ export default function HomeScreen() {
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Request camera permissions
   useEffect(() => {
     (async () => {
       const { status } = await Camera.requestCameraPermissionsAsync();
@@ -52,13 +51,11 @@ export default function HomeScreen() {
     })();
   }, []);
 
-  // Load scanned plates and imported plates on mount
   useEffect(() => {
     loadScannedPlates();
     loadImportedPlates();
   }, []);
 
-  // Location permissions and updates
   const requestLocationPermissionAndStartUpdates = useCallback(async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     setHasLocationPermission(status === 'granted');
@@ -77,7 +74,6 @@ export default function HomeScreen() {
     }
   }, []);
 
-  // Manage location updates based on screen focus
   useFocusEffect(
     useCallback(() => {
       requestLocationPermissionAndStartUpdates();
@@ -102,7 +98,6 @@ export default function HomeScreen() {
           const plate = line.split(',')[0];
           return { plate, isInRegistry: importedPlates.includes(plate) };
         });
-        // Invertir el orden para mostrar primero la última detectada
         setScannedPlates(platesData.reverse());
       }
     } catch (error) {
@@ -110,7 +105,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Recargar estilos cuando cambian las matrículas importadas
   useEffect(() => {
     if (scannedPlates.length > 0) {
       const updatedPlates = scannedPlates.map(item => ({
@@ -133,15 +127,11 @@ export default function HomeScreen() {
   };
 
   const showToast = (message: string, type: 'success' | 'warning' | 'error') => {
-    // Limpiar timeout anterior si existe
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
     }
-
     const toastId = Date.now().toString();
     setToast({ id: toastId, message, type });
-
-    // Auto-desaparecer después de 1 segundo
     toastTimeoutRef.current = setTimeout(() => {
       setToast(null);
     }, 1000);
@@ -186,7 +176,6 @@ export default function HomeScreen() {
 
         if (photo.uri) {
           const result = await TextRecognition.recognize(photo.uri);
-
           const cleanText = result.text.replace(/[^A-Z0-9]/gi, '').toUpperCase();
           const plateRegex = /\d{4}[B-DF-HJ-NP-TV-Z]{3}/;
           const match = cleanText.match(plateRegex);
@@ -197,7 +186,6 @@ export default function HomeScreen() {
 
             if (isMatch) {
               setFrameColor('red');
-              // Vibración en detección de matrícula en registro
               if (Platform.OS !== 'web') {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               }
@@ -234,14 +222,10 @@ export default function HomeScreen() {
 
   const getToastBackgroundColor = (type: string) => {
     switch (type) {
-      case 'success':
-        return '#808080'; // Gris
-      case 'warning':
-        return '#FF9500'; // Naranja
-      case 'error':
-        return '#FF3B30'; // Rojo
-      default:
-        return '#808080';
+      case 'success': return '#808080';
+      case 'warning': return '#FF9500';
+      case 'error': return '#FF3B30';
+      default: return '#808080';
     }
   };
 
@@ -254,61 +238,71 @@ export default function HomeScreen() {
         enableTorch={isTorchOn}
         onCameraReady={() => setCameraReady(true)}
         facing="back"
-      />
-      {/* Marco de enfoque centrado */}
-      <View style={[styles.focusFrame, { borderColor: frameColor }]} />
-
-
-
-      {/* Toast flotante */}
-      {toast && (
-        <View
-          style={[
-            styles.toast,
-            { backgroundColor: getToastBackgroundColor(toast.type) }
-          ]}
+      >
+        {/* Botón interactivo de Linterna */}
+        <TouchableOpacity 
+          onPress={() => setIsTorchOn(!isTorchOn)}
+          style={[styles.torchButton, { backgroundColor: isTorchOn ? 'rgba(255, 215, 0, 0.4)' : 'rgba(0, 0, 0, 0.5)' }]}
         >
-          <Text style={styles.toastText}>{toast.message}</Text>
-        </View>
-      )}
-
-      <View style={styles.overlay}>
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={handleScan}
-          disabled={!cameraReady || !hasLocationPermission}
-        >
-          <Text style={styles.scanButtonText}>Escanear</Text>
+          <MaterialIcons 
+            name={isTorchOn ? "flash-on" : "flash-off"} 
+            size={24} 
+            color={isTorchOn ? "#FFD700" : "#FFFFFF"} 
+          />
         </TouchableOpacity>
 
-        <View style={styles.platesContainer}>
-          <View style={styles.platesHeader}>
-            <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
-            {scannedPlates.length > 0 && (
-              <TouchableOpacity onPress={() => setScannedPlates([])}>
-                <Text style={styles.clearButtonText}>×</Text>
-              </TouchableOpacity>
-            )}
+        {/* Marco de enfoque centrado */}
+        <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} />
+
+        {/* Toast flotante */}
+        {toast && (
+          <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]}>
+            <Text style={styles.toastText}>{toast.message}</Text>
           </View>
-          <ScrollView style={styles.platesScrollView}>
-            {scannedPlates.length > 0 ? (
-              scannedPlates.map((item, index) => (
-                <Text
-                  key={index}
-                  style={[
-                    styles.plateText,
-                    item.isInRegistry && styles.plateTextInRegistry
-                  ]}
-                >
-                  {item.plate}
-                </Text>
-              ))
-            ) : (
-              <Text style={styles.plateText}>Ninguna matrícula detectada aún.</Text>
-            )}
-          </ScrollView>
+        )}
+
+        {/* Capa de interfaz (Overlay) */}
+        <View style={styles.overlay}>
+          {/* Renderizado e integración del Slider de Zoom */}
+          <ZoomSlider zoom={zoom} setZoom={setZoom} />
+
+          <TouchableOpacity
+            style={styles.scanButton}
+            onPress={handleScan}
+            disabled={!cameraReady || !hasLocationPermission}
+          >
+            <Text style={styles.scanButtonText}>Escanear</Text>
+          </TouchableOpacity>
+
+          <View style={styles.platesContainer}>
+            <View style={styles.platesHeader}>
+              <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
+              {scannedPlates.length > 0 && (
+                <TouchableOpacity onPress={() => setScannedPlates([])}>
+                  <Text style={styles.clearButtonText}>×</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <ScrollView style={styles.platesScrollView}>
+              {scannedPlates.length > 0 ? (
+                scannedPlates.map((item, index) => (
+                  <Text
+                    key={index}
+                    style={[
+                      styles.plateText,
+                      item.isInRegistry && styles.plateTextInRegistry
+                    ]}
+                  >
+                    {item.plate}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.plateText}>Ninguna matrícula detectada aún.</Text>
+              )}
+            </ScrollView>
+          </View>
         </View>
-      </View>
+      </CameraView>
     </ScreenContainer>
   );
 }
@@ -321,6 +315,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
     paddingBottom: 20,
+    width: '100%',
   },
   scanButton: {
     backgroundColor: 'blue',
@@ -361,7 +356,6 @@ const styles = StyleSheet.create({
   platesScrollView: {
     flexGrow: 0,
   },
-
   plateText: {
     color: 'white',
     fontSize: 14,
@@ -400,10 +394,12 @@ const styles = StyleSheet.create({
   },
   torchButton: {
     position: 'absolute',
-    top: 40,
+    top: 50,
     left: 20,
-    padding: 10,
-    borderRadius: 20,
-    zIndex: 10,
+    padding: 12,
+    borderRadius: 25,
+    zIndex: 101,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
