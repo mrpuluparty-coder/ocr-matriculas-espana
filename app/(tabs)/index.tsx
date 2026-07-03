@@ -9,6 +9,8 @@ import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScreenContainer } from "@/components/screen-container";
+import { ZoomSlider } from "@/components/zoom-slider";
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
 const PLATES_FILE_NAME = 'matriculas_detectadas.csv';
@@ -35,6 +37,8 @@ export default function HomeScreen() {
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
   const [importedPlates, setImportedPlates] = useState<string[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [zoom, setZoom] = useState(0.2);
+  const [isTorchOn, setIsTorchOn] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
@@ -245,12 +249,16 @@ export default function HomeScreen() {
     <ScreenContainer className="flex-1 p-0">
       <CameraView
         ref={cameraRef}
-        style={[StyleSheet.absoluteFillObject, { transform: [{ scale: 2 }] }]}
+        style={StyleSheet.absoluteFillObject}
+        zoom={zoom}
+        enableTorch={isTorchOn}
         onCameraReady={() => setCameraReady(true)}
         facing="back"
       />
       {/* Marco de enfoque centrado */}
       <View style={[styles.focusFrame, { borderColor: frameColor }]} />
+
+
 
       {/* Toast flotante */}
       {toast && (
@@ -389,5 +397,13 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
+  },
+  torchButton: {
+    position: 'absolute',
+    top: 40,
+    left: 20,
+    padding: 10,
+    borderRadius: 20,
+    zIndex: 10,
   },
 });
