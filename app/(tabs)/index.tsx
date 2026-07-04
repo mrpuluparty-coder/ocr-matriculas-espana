@@ -37,7 +37,7 @@ export default function HomeScreen() {
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
   const [importedPlates, setImportedPlates] = useState<string[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [zoom, setZoom] = useState(0.2);
+  const [zoom, setZoom] = useState(0.33); // Forzar inicio en 2x exactos bajo la escala nativa
   const [isTorchOn, setIsTorchOn] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
@@ -239,18 +239,6 @@ export default function HomeScreen() {
         onCameraReady={() => setCameraReady(true)}
         facing="back"
       >
-        {/* Botón interactivo de Linterna */}
-        <TouchableOpacity 
-          onPress={() => setIsTorchOn(!isTorchOn)}
-          style={[styles.torchButton, { backgroundColor: isTorchOn ? 'rgba(255, 215, 0, 0.4)' : 'rgba(0, 0, 0, 0.5)' }]}
-        >
-          <MaterialIcons 
-            name={isTorchOn ? "flash-on" : "flash-off"} 
-            size={24} 
-            color={isTorchOn ? "#FFD700" : "#FFFFFF"} 
-          />
-        </TouchableOpacity>
-
         {/* Marco de enfoque centrado */}
         <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} />
 
@@ -261,10 +249,28 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Capa de interfaz (Overlay) */}
+        {/* Capa de interfaz inferior (Overlay) */}
         <View style={styles.overlay}>
-          {/* Renderizado e integración del Slider de Zoom */}
-          <ZoomSlider zoom={zoom} setZoom={setZoom} />
+          
+          {/* Fila de controles inferiores unificados (Linterna + ZoomSlider) */}
+          <View style={styles.controlsRow}>
+            {/* Botón de la linterna alineado a nivel UX */}
+            <TouchableOpacity 
+              onPress={() => setIsTorchOn(!isTorchOn)}
+              style={[styles.torchButtonContainer, { backgroundColor: isTorchOn ? 'rgba(255, 215, 0, 0.4)' : 'rgba(0, 0, 0, 0.6)' }]}
+            >
+              <MaterialIcons 
+                name={isTorchOn ? "flash-on" : "flash-off"} 
+                size={22} 
+                color={isTorchOn ? "#FFD700" : "#FFFFFF"} 
+              />
+            </TouchableOpacity>
+
+            {/* Contenedor aislado para el Slider (evita inversión y desbordes) */}
+            <View style={styles.sliderContainer}>
+              <ZoomSlider zoom={zoom} setZoom={setZoom} />
+            </View>
+          </View>
 
           <TouchableOpacity
             style={styles.scanButton}
@@ -316,6 +322,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: 20,
     width: '100%',
+  },
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '90%',
+    marginBottom: 15,
+  },
+  torchButtonContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sliderContainer: {
+    width: '80%',
+    height: 50,
+    justifyContent: 'center',
   },
   scanButton: {
     backgroundColor: 'blue',
@@ -391,15 +416,5 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
-  },
-  torchButton: {
-    position: 'absolute',
-    top: 50,
-    left: 20,
-    padding: 12,
-    borderRadius: 25,
-    zIndex: 101,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });
