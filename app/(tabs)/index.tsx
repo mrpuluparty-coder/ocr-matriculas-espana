@@ -37,7 +37,7 @@ export default function HomeScreen() {
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
   const [importedPlates, setImportedPlates] = useState<string[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [zoom, setZoom] = useState(0.33); // Inicia en modo 2x nativo de forma exacta
+  const [zoom, setZoom] = useState(0.33);
   const [isTorchOn, setIsTorchOn] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
@@ -231,7 +231,6 @@ export default function HomeScreen() {
 
   return (
     <ScreenContainer className="flex-1 p-0">
-      {/* 1. Cámara como componente autocierre puro para solventar el parpadeo negro */}
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
@@ -239,73 +238,80 @@ export default function HomeScreen() {
         enableTorch={isTorchOn}
         onCameraReady={() => setCameraReady(true)}
         facing="back"
-      />
+      >
+        {/* Marco de enfoque centrado */}
+        <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} />
 
-      {/* 2. Overlays y Marcos hermanos absolutos */}
-      <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} />
-
-      {toast && (
-        <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]}>
-          <Text style={styles.toastText}>{toast.message}</Text>
-        </View>
-      )}
-
-      {/* 3. Slider absoluto lateral derecho (Alineado con base de Escanear, libre de solapamientos) */}
-      <View style={styles.sliderAbsoluteContainer}>
-        <ZoomSlider zoom={zoom} setZoom={setZoom} />
-      </View>
-
-      {/* 4. Capa contenedora inferior de interfaz */}
-      <View style={styles.overlay}>
-        
-        {/* Botón de la Linterna: Centrado horizontalmente en eje X sobre el botón de escanear */}
-        <TouchableOpacity 
-          onPress={() => setIsTorchOn(!isTorchOn)}
-          style={[styles.torchButtonCentered, { backgroundColor: isTorchOn ? 'rgba(255, 215, 0, 0.4)' : 'rgba(0, 0, 0, 0.6)' }]}
-        >
-          <MaterialIcons 
-            name={isTorchOn ? "flash-on" : "flash-off"} 
-            size={24} 
-            color={isTorchOn ? "#FFD700" : "#FFFFFF"} 
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={handleScan}
-          disabled={!cameraReady || !hasLocationPermission}
-        >
-          <Text style={styles.scanButtonText}>Escanear</Text>
-        </TouchableOpacity>
-
-        <View style={styles.platesContainer}>
-          <View style={styles.platesHeader}>
-            <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
-            {scannedPlates.length > 0 && (
-              <TouchableOpacity onPress={() => setScannedPlates([])}>
-                <Text style={styles.clearButtonText}>×</Text>
-              </TouchableOpacity>
-            )}
+        {/* Toast flotante */}
+        {toast && (
+          <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]}>
+            <Text style={styles.toastText}>{toast.message}</Text>
           </View>
-          <ScrollView style={styles.platesScrollView}>
-            {scannedPlates.length > 0 ? (
-              scannedPlates.map((item, index) => (
-                <Text
-                  key={index}
-                  style={[
-                    styles.plateText,
-                    item.isInRegistry && styles.plateTextInRegistry
-                  ]}
-                >
-                  {item.plate}
-                </Text>
-              ))
-            ) : (
-              <Text style={styles.plateText}>Ninguna matrícula detectada aún.</Text>
-            )}
-          </ScrollView>
+        )}
+
+        {/* Capa contenedora principal de controles inferiores */}
+        <View style={styles.overlay}>
+          
+          {/* Fila del Botón Escanear + Linterna Horizontal + Slider Derecho */}
+          <View style={styles.scanRow}>
+            
+            {/* Linterna: Posicionada a la izquierda de la fila y perfectamente centrada en altura */}
+            <TouchableOpacity 
+              onPress={() => setIsTorchOn(!isTorchOn)}
+              style={[styles.torchButtonLeft, { backgroundColor: isTorchOn ? 'rgba(255, 215, 0, 0.4)' : 'rgba(0, 0, 0, 0.6)' }]}
+            >
+              <MaterialIcons 
+                name={isTorchOn ? "flash-on" : "flash-off"} 
+                size={24} 
+                color={isTorchOn ? "#FFD700" : "#FFFFFF"} 
+              />
+            </TouchableOpacity>
+
+            {/* Botón Central de Escaneo */}
+            <TouchableOpacity
+              style={styles.scanButton}
+              onPress={handleScan}
+              disabled={!cameraReady || !hasLocationPermission}
+            >
+              <Text style={styles.scanButtonText}>Escanear</Text>
+            </TouchableOpacity>
+
+            {/* Slider en el recuadro de la derecha absoluta */}
+            <View style={styles.sliderAbsoluteRight}>
+              <ZoomSlider zoom={zoom} setZoom={setZoom} />
+            </View>
+          </View>
+
+          {/* Contenedor de registros */}
+          <View style={styles.platesContainer}>
+            <View style={styles.platesHeader}>
+              <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
+              {scannedPlates.length > 0 && (
+                <TouchableOpacity onPress={() => setScannedPlates([])} style={styles.clearCircleButton}>
+                  <MaterialIcons name="close" size={16} color="white" />
+                </TouchableOpacity>
+              )}
+            </View>
+            <ScrollView style={styles.platesScrollView}>
+              {scannedPlates.length > 0 ? (
+                scannedPlates.map((item, index) => (
+                  <Text
+                    key={index}
+                    style={[
+                      styles.plateText,
+                      item.isInRegistry && styles.plateTextInRegistry
+                    ]}
+                  >
+                    {item.plate}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.plateText}>Ninguna matrícula detectada aún.</Text>
+              )}
+            </ScrollView>
+          </View>
         </View>
-      </View>
+      </CameraView>
     </ScreenContainer>
   );
 }
@@ -319,30 +325,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: 20,
   },
-  torchButtonCentered: {
+  scanRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    position: 'relative',
+    marginBottom: 20,
+    height: 60,
+  },
+  torchButtonLeft: {
+    position: 'absolute',
+    left: 25,
     width: 48,
     height: 48,
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 15,
+    zIndex: 10,
   },
-  sliderAbsoluteContainer: {
+  sliderAbsoluteRight: {
     position: 'absolute',
-    right: 15,
-    bottom: 165,
-    width: 60,
-    height: 180,
+    right: 20,
+    bottom: 0,
+    width: 50,
+    height: 160,
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 10,
+    zIndex: 5,
   },
   scanButton: {
     backgroundColor: 'blue',
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 30,
-    marginBottom: 20,
   },
   scanButtonText: {
     color: 'white',
@@ -367,11 +383,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  clearButtonText: {
-    color: 'white',
-    fontSize: 24,
-    fontWeight: 'bold',
-    padding: 4,
+  clearCircleButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   platesScrollView: {
     flexGrow: 0,
