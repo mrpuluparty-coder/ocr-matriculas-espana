@@ -9,7 +9,6 @@ import * as Haptics from 'expo-haptics';
 import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ScreenContainer } from "@/components/screen-container";
-import { ZoomSlider } from "@/components/zoom-slider";
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
@@ -28,6 +27,10 @@ interface ScannedPlateItem {
   isInRegistry: boolean;
 }
 
+// Zoom presets: 1.5x, 2x, 4x
+const ZOOM_PRESETS = [0.2, 0.33, 0.66]; // Valores de zoom para 1.5x, 2x, 4x
+const ZOOM_LABELS = ['1.5x', '2x', '4x'];
+
 export default function HomeScreen() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [hasLocationPermission, setHasLocationPermission] = useState<boolean | null>(null);
@@ -37,7 +40,7 @@ export default function HomeScreen() {
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
   const [importedPlates, setImportedPlates] = useState<string[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [zoom, setZoom] = useState(0.33);
+  const [zoomIndex, setZoomIndex] = useState(0); // Inicia en 1.5x (índice 0)
   const [isTorchOn, setIsTorchOn] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
@@ -210,6 +213,11 @@ export default function HomeScreen() {
     }
   };
 
+  const handleZoomPreset = () => {
+    const nextIndex = (zoomIndex + 1) % ZOOM_PRESETS.length;
+    setZoomIndex(nextIndex);
+  };
+
   if (hasCameraPermission === null || hasLocationPermission === null) {
     return <ScreenContainer className="flex-1 items-center justify-center"><Text>Solicitando permisos...</Text></ScreenContainer>;
   }
@@ -229,12 +237,15 @@ export default function HomeScreen() {
     }
   };
 
+  const currentZoom = ZOOM_PRESETS[zoomIndex];
+  const currentZoomLabel = ZOOM_LABELS[zoomIndex];
+
   return (
     <ScreenContainer className="flex-1 p-0">
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
-        zoom={zoom}
+        zoom={currentZoom}
         enableTorch={isTorchOn}
         onCameraReady={() => setCameraReady(true)}
         facing="back"
@@ -252,7 +263,7 @@ export default function HomeScreen() {
         {/* Capa contenedora principal de controles inferiores */}
         <View style={styles.overlay}>
           
-          {/* Fila del Botón Escanear + Linterna Horizontal + Slider Derecho */}
+          {/* Fila del Botón Escanear + Linterna Izquierda + Zoom Derecha */}
           <View style={styles.scanRow}>
             
             {/* Linterna: Posicionada a la izquierda de la fila y perfectamente centrada en altura */}
@@ -276,10 +287,13 @@ export default function HomeScreen() {
               <Text style={styles.scanButtonText}>Escanear</Text>
             </TouchableOpacity>
 
-            {/* Slider en el recuadro de la derecha absoluta */}
-            <View style={styles.sliderAbsoluteRight}>
-              <ZoomSlider zoom={zoom} setZoom={setZoom} />
-            </View>
+            {/* Botón de Presets de Zoom a la derecha */}
+            <TouchableOpacity 
+              onPress={handleZoomPreset}
+              style={[styles.zoomButtonRight, { backgroundColor: 'rgba(0, 0, 0, 0.6)' }]}
+            >
+              <Text style={styles.zoomButtonText}>{currentZoomLabel}</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Contenedor de registros */}
@@ -344,15 +358,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 10,
   },
-  sliderAbsoluteRight: {
+  zoomButtonRight: {
     position: 'absolute',
-    right: 20,
-    bottom: 0,
-    width: 50,
-    height: 160,
+    right: 25,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 5,
+    zIndex: 10,
+  },
+  zoomButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   scanButton: {
     backgroundColor: 'blue',
