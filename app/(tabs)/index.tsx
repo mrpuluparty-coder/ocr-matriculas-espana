@@ -28,7 +28,7 @@ interface ScannedPlateItem {
 }
 
 // Zoom presets: 1.5x, 2x, 4x
-const ZOOM_PRESETS = [0.2, 0.33, 0.66]; // Valores de zoom para 1.5x, 2x, 4x
+const ZOOM_PRESETS = [0.2, 0.33, 0.66];
 const ZOOM_LABELS = ['1.5x', '2x', '4x'];
 
 export default function HomeScreen() {
@@ -40,7 +40,7 @@ export default function HomeScreen() {
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
   const [importedPlates, setImportedPlates] = useState<string[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [zoomIndex, setZoomIndex] = useState(0); // Inicia en 1.5x (índice 0)
+  const [zoomIndex, setZoomIndex] = useState(0);
   const [isTorchOn, setIsTorchOn] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
@@ -175,6 +175,7 @@ export default function HomeScreen() {
           quality: 0.85,
           base64: false,
           exif: false,
+          skipProcessing: true,
         });
 
         if (photo.uri) {
@@ -242,6 +243,7 @@ export default function HomeScreen() {
 
   return (
     <ScreenContainer className="flex-1 p-0">
+      {/* CameraView autocerrada sin hijos - ciclo nativo puro */}
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
@@ -249,24 +251,28 @@ export default function HomeScreen() {
         enableTorch={isTorchOn}
         onCameraReady={() => setCameraReady(true)}
         facing="back"
-      >
+      />
+
+      {/* Contenedor de overlays como hermano absoluto - pointerEvents="box-none" para no interferir */}
+      <View style={styles.overlayContainer} pointerEvents="box-none">
+        
         {/* Marco de enfoque centrado */}
-        <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} />
+        <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} pointerEvents="none" />
 
         {/* Toast flotante */}
         {toast && (
-          <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]}>
+          <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]} pointerEvents="none">
             <Text style={styles.toastText}>{toast.message}</Text>
           </View>
         )}
 
         {/* Capa contenedora principal de controles inferiores */}
-        <View style={styles.overlay}>
+        <View style={styles.overlay} pointerEvents="box-none">
           
-          {/* Fila del Botón Escanear + Linterna Izquierda + Zoom Derecha */}
-          <View style={styles.scanRow}>
+          {/* Fila de control flotante ultra-alineada */}
+          <View style={styles.scanRow} pointerEvents="box-none">
             
-            {/* Linterna: Posicionada a la izquierda de la fila y perfectamente centrada en altura */}
+            {/* Linterna: Posicionada absoluta a la izquierda, centrada en altura por alignItems del padre */}
             <TouchableOpacity 
               onPress={() => setIsTorchOn(!isTorchOn)}
               style={[styles.torchButtonLeft, { backgroundColor: isTorchOn ? 'rgba(255, 215, 0, 0.4)' : 'rgba(0, 0, 0, 0.6)' }]}
@@ -278,7 +284,7 @@ export default function HomeScreen() {
               />
             </TouchableOpacity>
 
-            {/* Botón Central de Escaneo */}
+            {/* Botón Central de Escaneo - flujo orgánico en el centro */}
             <TouchableOpacity
               style={styles.scanButton}
               onPress={handleScan}
@@ -287,7 +293,7 @@ export default function HomeScreen() {
               <Text style={styles.scanButtonText}>Escanear</Text>
             </TouchableOpacity>
 
-            {/* Botón de Presets de Zoom a la derecha */}
+            {/* Botón de Presets de Zoom a la derecha - absoluto simétrico */}
             <TouchableOpacity 
               onPress={handleZoomPreset}
               style={[styles.zoomButtonRight, { backgroundColor: 'rgba(0, 0, 0, 0.6)' }]}
@@ -297,7 +303,7 @@ export default function HomeScreen() {
           </View>
 
           {/* Contenedor de registros */}
-          <View style={styles.platesContainer}>
+          <View style={styles.platesContainer} pointerEvents="box-none">
             <View style={styles.platesHeader}>
               <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
               {scannedPlates.length > 0 && (
@@ -325,12 +331,16 @@ export default function HomeScreen() {
             </ScrollView>
           </View>
         </View>
-      </CameraView>
+      </View>
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
+  overlayContainer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+  },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
