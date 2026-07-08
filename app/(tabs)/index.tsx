@@ -38,7 +38,7 @@ export default function HomeScreen() {
   const [cameraReady, setCameraReady] = useState(false);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
-  const [importedPlates, setImportedPlates] = useState<string[]>([]);
+  const [importedPlates, setImportedPlates] = useState<Record<string, any>>({});
   const [toast, setToast] = useState<Toast | null>(null);
   const [zoomIndex, setZoomIndex] = useState(0);
   const [isTorchOn, setIsTorchOn] = useState(false);
@@ -122,7 +122,18 @@ export default function HomeScreen() {
     try {
       const storedPlates = await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY);
       if (storedPlates) {
-        setImportedPlates(JSON.parse(storedPlates));
+        const parsed = JSON.parse(storedPlates);
+        // Si es un diccionario (objeto), usarlo directamente; si es array, convertir a diccionario
+        if (Array.isArray(parsed)) {
+          // Compatibilidad: convertir array antiguo a diccionario
+          const dict: Record<string, any> = {};
+          parsed.forEach(plate => {
+            dict[plate] = { fecha: '', hora: '', latitud: 0, longitud: 0, lugar: '' };
+          });
+          setImportedPlates(dict);
+        } else {
+          setImportedPlates(parsed);
+        }
       }
     } catch (error) {
       console.error('Error loading imported plates:', error);
@@ -147,7 +158,7 @@ export default function HomeScreen() {
       const date = now.toLocaleDateString('es-ES');
       const time = now.toLocaleTimeString('es-ES', { hour12: false });
       const latLong = location ? `${location.coords.latitude},${location.coords.longitude}` : 'N/A,N/A';
-      const place = isMatch ? 'DF' : 'AC';
+      const place = 'REGISTRO_MATCH'; // Siempre guardar como REGISTRO_MATCH
 
       const entry = `${plate},${date},${time},${latLong},${place}\n`;
 
@@ -186,7 +197,8 @@ export default function HomeScreen() {
 
           if (match && match[0]) {
             const detectedPlate = match[0];
-            const isMatch = importedPlates.includes(detectedPlate);
+            // Verificar si la matrícula existe en el registro importado (diccionario)
+            const isMatch = typeof importedPlates === 'object' && !Array.isArray(importedPlates) && detectedPlate in importedPlates;
 
             if (isMatch) {
               setFrameColor('red');
@@ -195,10 +207,12 @@ export default function HomeScreen() {
               }
               showToast(`¡${detectedPlate} en registro!`, 'warning');
               setTimeout(() => setFrameColor('blue'), 500);
+              // SOLO guardar si está en registro
+              savePlate(detectedPlate, true);
             } else {
-              showToast(`${detectedPlate} detectada`, 'success');
+              // No está en registro - mostrar toast pero NO guardar
+              showToast(`${detectedPlate} no en registro`, 'success');
             }
-            savePlate(detectedPlate, isMatch);
           } else {
             showToast('No se detectó matrícula válida', 'error');
           }
