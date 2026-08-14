@@ -202,18 +202,17 @@ export default function RegistroScreen() {
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const selectedAsset = result.assets[0];
-        const tempUri = `${FileSystem.cacheDirectory}temp_import.csv`;
-        const fileInfo = await FileSystem.getInfoAsync(tempUri);
-        if (fileInfo.exists) {
-          await FileSystem.deleteAsync(tempUri, { idempotent: true });
+        const tempFile = new File(Paths.cache, 'temp_import.csv');
+        if (tempFile.exists) {
+          tempFile.delete();
         }
 
         await FileSystem.copyAsync({
           from: selectedAsset.uri,
-          to: tempUri
+          to: tempFile.uri
         });
 
-        const csvContent = await FileSystem.readAsStringAsync(tempUri, { encoding: FileSystem.EncodingType.UTF8 });
+        const csvContent = await tempFile.text();
         const lines = csvContent.replace(/\r\n/g, '\n').split('\n').filter(line => line.trim() !== '');
 
         const newImportedPlates: Record<string, ImportedPlateData> = {};
@@ -245,7 +244,9 @@ export default function RegistroScreen() {
 
         await AsyncStorage.setItem(IMPORTED_PLATES_STORAGE_KEY, JSON.stringify(newImportedPlates));
         setImportedPlates(newImportedPlates);
-        await FileSystem.deleteAsync(tempUri, { idempotent: true });
+        if (tempFile.exists) {
+          tempFile.delete();
+        }
         Alert.alert('Éxito', `Se importaron ${Object.keys(newImportedPlates).length} matrículas correctamente.`);
       }
     } catch (error) {
@@ -318,28 +319,6 @@ export default function RegistroScreen() {
         </View>
         <MaterialIcons name="chevron-right" size={24} color="#687076" />
       </TouchableOpacity>
-    );
-  };
-
-  const renderNotificationRuleItem = ({ item }: { plate: string, rule: NotificationRule }) => {
-    return (
-      <View style={styles.ruleItem}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rulePlate}>{item.plate}</Text>
-          <Text style={styles.ruleMessage} numberOfLines={1}>{item.message}</Text>
-        </View>
-        <Switch
-          value={item.active}
-          onValueChange={() => handleToggleRuleActive(item.plate)}
-          style={{ marginRight: 10 }}
-        />
-        <TouchableOpacity onPress={() => handleOpenEditRule(item.plate)} style={styles.iconButton}>
-          <MaterialIcons name="edit" size={20} color="#007AFF" />
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => handleDeleteRule(item.plate)} style={styles.iconButton}>
-          <MaterialIcons name="delete" size={20} color="#FF3B30" />
-        </TouchableOpacity>
-      </View>
     );
   };
 
