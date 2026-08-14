@@ -31,3 +31,18 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 
 - [x] Evitar la confirmación de borrado de node_modules de pnpm en el builder remoto sin TTY.
 - [x] Ejecutar validación de TypeScript y bundle JavaScript de Expo antes del nuevo checkpoint.
+
+## Investigación de Bundle JavaScript EAS — 2026-08-15
+
+- [x] Localizar la causa raíz exacta anterior al paso Bundle JavaScript build phase del último build Android.
+- [x] Auditar incompatibilidades de dependencias, imports y configuración Expo.
+- [x] Aplicar únicamente la corrección respaldada por el diagnóstico.
+- [x] Validar Preview, TypeScript y bundle Android antes de preparar una nueva construcción.
+
+## Corrección de compatibilidad de mapas — 2026-08-15
+
+- [x] Mantener react-native-maps en Android y sustituir su importación directa en Web por una vista de respaldo segura.
+
+## Estabilidad de Preview — 2026-08-15
+
+- [ ] Reducir los watchers de Metro para evitar ENOSPC en la vista previa del proyecto con pnpm.

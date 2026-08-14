@@ -4,9 +4,9 @@ import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import { File, Paths } from 'expo-file-system';
-import MapView, { Marker } from 'react-native-maps';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { ScreenContainer } from "@/components/screen-container";
+import { PlateLocationMap } from "@/components/plate-location-map";
 import { useFocusEffect } from 'expo-router';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
@@ -486,37 +486,18 @@ export default function RegistroScreen() {
                 </TouchableOpacity>
               </View>
 
-              <MapView
-                style={styles.map}
-                initialRegion={{
-                  latitude: selectedPlate.latitude,
-                  longitude: selectedPlate.longitude,
-                  latitudeDelta: 0.05,
-                  longitudeDelta: 0.05,
-                }}
-              >
-                {/* PIN VERDE: Ubicación de escaneo */}
-                <Marker
-                  coordinate={{
+              {importedPlates[selectedPlate.plate] && (
+                <PlateLocationMap
+                  scannedLocation={{
                     latitude: selectedPlate.latitude,
                     longitude: selectedPlate.longitude,
                   }}
-                  title="Lugar de Escaneo"
-                  pinColor="green"
+                  originalLocation={{
+                    latitude: importedPlates[selectedPlate.plate].latitud,
+                    longitude: importedPlates[selectedPlate.plate].longitud,
+                  }}
                 />
-
-                {/* PIN ROJO: Ubicación original CSV */}
-                {importedPlates[selectedPlate.plate] && (
-                  <Marker
-                    coordinate={{
-                      latitude: importedPlates[selectedPlate.plate].latitud,
-                      longitude: importedPlates[selectedPlate.plate].longitud,
-                    }}
-                    title="Ubicación Original CSV"
-                    pinColor="red"
-                  />
-                )}
-              </MapView>
+              )}
             </>
           )}
         </View>
