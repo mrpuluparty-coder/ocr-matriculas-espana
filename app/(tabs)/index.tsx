@@ -1,5 +1,5 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, AppState, AppStateStatus } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
 import * as FileSystem from 'expo-file-system';
 import { File, Paths } from 'expo-file-system';
@@ -12,6 +12,9 @@ import { ScreenContainer } from "@/components/screen-container";
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
+const NOTIFICATION_RULES_STORAGE_KEY = 'notification_rules';
+const GLOBAL_NOTIFICATIONS_KEY = 'global_notifications_active';
+const ZOOM_STORAGE_KEY = 'camera_zoom_index';
 const PLATES_FILE_NAME = 'matriculas_detectadas.csv';
 
 const getPlatesFile = () => new File(Paths.document, PLATES_FILE_NAME);
@@ -19,7 +22,7 @@ const getPlatesFile = () => new File(Paths.document, PLATES_FILE_NAME);
 interface Toast {
   id: string;
   message: string;
-  type: 'success' | 'warning' | 'error';
+  type: 'success' | 'warning' | 'error' | 'custom_notification';
 }
 
 interface ScannedPlateItem {
@@ -27,9 +30,15 @@ interface ScannedPlateItem {
   isInRegistry: boolean;
 }
 
-// Zoom presets: 1.5x, 2x, 4x
-const ZOOM_PRESETS = [0.2, 0.33, 0.66];
-const ZOOM_LABELS = ['1.5x', '2x', '4x'];
+interface NotificationRule {
+  plate: string;
+  message: string;
+  active: boolean;
+}
+
+// Zoom presets: 1x (angular), 1.5x, 2x, 4x
+const ZOOM_PRESETS = [0.0, 0.2, 0.33, 0.66];
+const ZOOM_LABELS = ['1x', '1.5x', '2x', '4x'];
 
 export default function HomeScreen() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
@@ -39,6 +48,8 @@ export default function HomeScreen() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [frameColor, setFrameColor] = useState<'blue' | 'red'>('blue');
   const [importedPlates, setImportedPlates] = useState<Record<string, any>>({});
+  const [notificationRules, setNotificationRules] = useState<Record<string, NotificationRule>>({});
+  const [globalNotificationsActive, setGlobalNotificationsActive] = useState<boolean>(true);
   const [toast, setToast] = useState<Toast | null>(null);
   const [zoomIndex, setZoomIndex] = useState(0);
   const [isTorchOn, setIsTorchOn] = useState(false);
@@ -46,6 +57,7 @@ export default function HomeScreen() {
   const cameraRef = useRef<CameraView>(null);
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const appState = useRef(AppState.currentState);
 
   useEffect(() => {
     (async () => {
@@ -57,7 +69,54 @@ export default function HomeScreen() {
   useEffect(() => {
     loadScannedPlates();
     loadImportedPlates();
-  }, []);
+    loadNotificationSettings();
+    loadSavedZoom();
+
+    // Listener para guardar el estado del zoom al minimizar / background
+    const subscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
+      if (appState.current.match(/active/) && nextAppState.match(/inactive|background/)) {
+        try {
+          await AsyncStorage.setItem(ZOOM_STORAGE_KEY, zoomIndex.toString());
+        } catch (e) {
+          console.error('Error saving zoom state on background:', e);
+        }
+      }
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [zoomIndex]);
+
+  const loadSavedZoom = async () => {
+    try {
+      const savedZoom = await AsyncStorage.getItem(ZOOM_STORAGE_KEY);
+      if (savedZoom !== null) {
+        const parsed = parseInt(savedZoom, 10);
+        if (!isNaN(parsed) && parsed >= 0 && parsed < ZOOM_PRESETS.length) {
+          setZoomIndex(parsed);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading saved zoom:', error);
+    }
+  };
+
+  const loadNotificationSettings = async () => {
+    try {
+      const storedRules = await AsyncStorage.getItem(NOTIFICATION_RULES_STORAGE_KEY);
+      if (storedRules) {
+        setNotificationRules(JSON.parse(storedRules));
+      }
+      const storedGlobal = await AsyncStorage.getItem(GLOBAL_NOTIFICATIONS_KEY);
+      if (storedGlobal !== null) {
+        setGlobalNotificationsActive(JSON.parse(storedGlobal));
+      }
+    } catch (error) {
+      console.error('Error loading notification settings:', error);
+    }
+  };
 
   const requestLocationPermissionAndStartUpdates = useCallback(async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -80,6 +139,9 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       requestLocationPermissionAndStartUpdates();
+      loadNotificationSettings();
+      loadImportedPlates();
+      loadScannedPlates();
 
       return () => {
         if (locationSubscription.current) {
@@ -99,7 +161,7 @@ export default function HomeScreen() {
         const lines = content.split('\n').filter(Boolean);
         const platesData = lines.slice(1).map(line => {
           const plate = line.split(',')[0];
-          return { plate, isInRegistry: importedPlates.includes(plate) };
+          return { plate, isInRegistry: plate in importedPlates };
         });
         setScannedPlates(platesData.reverse());
       }
@@ -108,24 +170,12 @@ export default function HomeScreen() {
     }
   };
 
-  useEffect(() => {
-    if (scannedPlates.length > 0) {
-      const updatedPlates = scannedPlates.map(item => ({
-        ...item,
-        isInRegistry: importedPlates.includes(item.plate)
-      }));
-      setScannedPlates(updatedPlates);
-    }
-  }, [importedPlates]);
-
   const loadImportedPlates = async () => {
     try {
       const storedPlates = await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY);
       if (storedPlates) {
         const parsed = JSON.parse(storedPlates);
-        // Si es un diccionario (objeto), usarlo directamente; si es array, convertir a diccionario
         if (Array.isArray(parsed)) {
-          // Compatibilidad: convertir array antiguo a diccionario
           const dict: Record<string, any> = {};
           parsed.forEach(plate => {
             dict[plate] = { fecha: '', hora: '', latitud: 0, longitud: 0, lugar: '' };
@@ -140,25 +190,26 @@ export default function HomeScreen() {
     }
   };
 
-  const showToast = (message: string, type: 'success' | 'warning' | 'error') => {
+  const showToast = (message: string, type: 'success' | 'warning' | 'error' | 'custom_notification') => {
     if (toastTimeoutRef.current) {
       clearTimeout(toastTimeoutRef.current);
     }
     const toastId = Date.now().toString();
     setToast({ id: toastId, message, type });
+    const duration = type === 'custom_notification' ? 3000 : 1000;
     toastTimeoutRef.current = setTimeout(() => {
       setToast(null);
-    }, 1000);
+    }, duration);
   };
 
-  const savePlate = async (plate: string, isMatch: boolean) => {
+  const savePlate = async (plate: string) => {
     try {
       const platesFile = getPlatesFile();
       const now = new Date();
       const date = now.toLocaleDateString('es-ES');
       const time = now.toLocaleTimeString('es-ES', { hour12: false });
       const latLong = location ? `${location.coords.latitude},${location.coords.longitude}` : 'N/A,N/A';
-      const place = 'REGISTRO_MATCH'; // Siempre guardar como REGISTRO_MATCH
+      const place = 'REGISTRO_MATCH';
 
       const entry = `${plate},${date},${time},${latLong},${place}\n`;
 
@@ -197,7 +248,6 @@ export default function HomeScreen() {
 
           if (match && match[0]) {
             const detectedPlate = match[0];
-            // Verificar si la matrícula existe en el registro importado (diccionario)
             const isMatch = typeof importedPlates === 'object' && !Array.isArray(importedPlates) && detectedPlate in importedPlates;
 
             if (isMatch) {
@@ -205,12 +255,18 @@ export default function HomeScreen() {
               if (Platform.OS !== 'web') {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               }
-              showToast(`¡${detectedPlate} en registro!`, 'warning');
+
+              // Comprobar si hay regla de notificación personalizada para esta matrícula
+              const rule = notificationRules[detectedPlate];
+              if (globalNotificationsActive && rule && rule.active && rule.message) {
+                showToast(`🔔 ${rule.message}`, 'custom_notification');
+              } else {
+                showToast(`¡${detectedPlate} en registro!`, 'warning');
+              }
+
               setTimeout(() => setFrameColor('blue'), 500);
-              // SOLO guardar si está en registro
-              savePlate(detectedPlate, true);
+              savePlate(detectedPlate);
             } else {
-              // No está en registro - mostrar toast pero NO guardar
               showToast(`${detectedPlate} no en registro`, 'success');
             }
           } else {
@@ -248,6 +304,7 @@ export default function HomeScreen() {
       case 'success': return '#808080';
       case 'warning': return '#FF9500';
       case 'error': return '#FF3B30';
+      case 'custom_notification': return '#5856D6'; // Morado especial para notificación personalizada
       default: return '#808080';
     }
   };
@@ -257,7 +314,6 @@ export default function HomeScreen() {
 
   return (
     <ScreenContainer className="flex-1 p-0">
-      {/* CameraView autocerrada sin hijos - ciclo nativo puro */}
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
@@ -267,26 +323,17 @@ export default function HomeScreen() {
         facing="back"
       />
 
-      {/* Contenedor de overlays como hermano absoluto - pointerEvents="box-none" para no interferir */}
       <View style={styles.overlayContainer} pointerEvents="box-none">
-        
-        {/* Marco de enfoque centrado */}
         <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} pointerEvents="none" />
 
-        {/* Toast flotante */}
         {toast && (
           <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]} pointerEvents="none">
             <Text style={styles.toastText}>{toast.message}</Text>
           </View>
         )}
 
-        {/* Capa contenedora principal de controles inferiores */}
         <View style={styles.overlay} pointerEvents="box-none">
-          
-          {/* Fila de control flotante ultra-alineada */}
           <View style={styles.scanRow} pointerEvents="box-none">
-            
-            {/* Linterna: Posicionada absoluta a la izquierda, centrada en altura por alignItems del padre */}
             <TouchableOpacity 
               onPress={() => setIsTorchOn(!isTorchOn)}
               style={[styles.torchButtonLeft, { backgroundColor: isTorchOn ? 'rgba(255, 215, 0, 0.4)' : 'rgba(0, 0, 0, 0.6)' }]}
@@ -298,7 +345,6 @@ export default function HomeScreen() {
               />
             </TouchableOpacity>
 
-            {/* Botón Central de Escaneo - flujo orgánico en el centro */}
             <TouchableOpacity
               style={styles.scanButton}
               onPress={handleScan}
@@ -307,7 +353,6 @@ export default function HomeScreen() {
               <Text style={styles.scanButtonText}>Escanear</Text>
             </TouchableOpacity>
 
-            {/* Botón de Presets de Zoom a la derecha - absoluto simétrico */}
             <TouchableOpacity 
               onPress={handleZoomPreset}
               style={[styles.zoomButtonRight, { backgroundColor: 'rgba(0, 0, 0, 0.6)' }]}
@@ -316,7 +361,6 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Contenedor de registros */}
           <View style={styles.platesContainer} pointerEvents="box-none">
             <View style={styles.platesHeader}>
               <Text style={styles.platesTitle}>Matrículas Detectadas:</Text>
@@ -363,6 +407,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: 20,
   },
+  focusFrame: {
+    position: 'absolute',
+    top: '25%',
+    left: '10%',
+    right: '10%',
+    height: 120,
+    borderWidth: 3,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+  },
+  toast: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    zIndex: 100,
+  },
+  toastText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
   scanRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -398,7 +467,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   scanButton: {
-    backgroundColor: 'blue',
+    backgroundColor: '#007AFF',
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 30,
@@ -411,7 +480,7 @@ const styles = StyleSheet.create({
   platesContainer: {
     backgroundColor: 'rgba(0,0,0,0.7)',
     width: '90%',
-    maxHeight: 100,
+    maxHeight: 120,
     borderRadius: 10,
     padding: 10,
   },
@@ -430,47 +499,20 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    backgroundColor: 'rgba(255,255,255,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   platesScrollView: {
-    flexGrow: 0,
+    maxHeight: 80,
   },
   plateText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 16,
+    marginVertical: 2,
   },
   plateTextInRegistry: {
     color: '#FF3B30',
     fontWeight: 'bold',
-  },
-  focusFrame: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 250,
-    height: 100,
-    marginTop: -50,
-    marginLeft: -125,
-    borderWidth: 3,
-    borderRadius: 5,
-    zIndex: 1,
-  },
-  toast: {
-    position: 'absolute',
-    top: 50,
-    left: '10%',
-    right: '10%',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    zIndex: 100,
-    alignItems: 'center',
-  },
-  toastText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
   },
 });
