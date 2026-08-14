@@ -3,3 +3,4 @@ allowBuilds:
   unrs-resolver: true
 
 strictPeerDependencies: false
+confirmModulesPurge: false
