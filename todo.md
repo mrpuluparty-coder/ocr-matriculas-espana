@@ -71,3 +71,20 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Simplificar CSV e historial a matrícula, fecha/hora y estado de coincidencia sin coordenadas.
 - [x] Desactivar experiments.reactCompiler sin actualizar versiones no solicitadas.
 - [x] Ejecutar instalación congelada, TypeScript y exportación Android de producción sin construir APK.
+
+## ZIP limpio actualizado — 2026-08-15
+
+- [x] Generar un ZIP del estado simplificado sin node_modules, .expo, dist ni carpetas de build.
+- [x] Verificar exclusiones y entregar la descarga actualizada.
+
+## Validación sin modificaciones — 2026-08-15
+
+- [x] Ejecutar instalación congelada sin modificar dependencias.
+- [x] Ejecutar TypeScript sin modificar código.
+- [x] Ejecutar exportación Android de producción sin generar APK (falló al resolver react-native-css-interop/jsx-runtime).
+
+## Resolución de NativeWind en Metro — 2026-08-15
+
+- [x] Inspeccionar versiones, lockfile, instalación física, imports y configuración de NativeWind.
+- [x] Aplicar únicamente la corrección mínima para resolver react-native-css-interop/jsx-runtime.
+- [x] Validar instalación congelada, TypeScript y export Android sin construir APK.
