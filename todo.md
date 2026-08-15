@@ -46,3 +46,9 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 ## Estabilidad de Preview — 2026-08-15
 
 - [ ] Reducir los watchers de Metro para evitar ENOSPC en la vista previa del proyecto con pnpm.
+
+## Nuevo fallo de compilación APK — 2026-08-15
+
+- [ ] Localizar los logs completos del último intento remoto que falla en Bundle JavaScript build phase.
+- [x] Comparar las versiones actuales de Expo y React Navigation con la matriz compatible del SDK 54.
+- [x] Corregir las incompatibilidades detectadas y volver a validar el bundle Android local.
