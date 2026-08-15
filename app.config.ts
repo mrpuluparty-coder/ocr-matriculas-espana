@@ -52,8 +52,7 @@ const config: ExpoConfig = {
     bundleIdentifier: env.iosBundleId,
     "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Necesitamos acceso a tu cámara para capturar fotos de matrículas",
-        "NSPhotoLibraryUsageDescription": "Necesitamos acceso a tu galería para guardar las fotos capturadas"
+        "NSCameraUsageDescription": "Necesitamos acceso a tu cámara para capturar fotos de matrículas"
       }
   },
   android: {
@@ -66,7 +65,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["POST_NOTIFICATIONS", "CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"],
+    permissions: ["CAMERA"],
     intentFilters: [
       {
         action: "VIEW",
@@ -133,7 +132,6 @@ const config: ExpoConfig = {
   ],
   experiments: {
     typedRoutes: true,
-    reactCompiler: true,
   },
 };
 

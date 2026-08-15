@@ -58,3 +58,16 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Recopilar los logs y evidencias disponibles del fallo remoto de APK.
 - [x] Identificar los archivos de configuración, dependencias e imports más relevantes para una segunda revisión.
 - [x] Entregar un informe autocontenido con los hallazgos y las limitaciones de acceso al log remoto.
+
+## Exportación limpia para revisión externa — 2026-08-15
+
+- [x] Crear un ZIP del código fuente sin node_modules, .expo, dist ni carpetas de build.
+- [x] Verificar exclusiones y entregar la descarga.
+
+## Simplificación previa a build — 2026-08-15
+
+- [x] Eliminar react-native-maps, los componentes de mapa y toda la interfaz de ubicaciones.
+- [x] Eliminar expo-location, permisos GPS, watchPositionAsync y campos de coordenadas.
+- [x] Simplificar CSV e historial a matrícula, fecha/hora y estado de coincidencia sin coordenadas.
+- [x] Desactivar experiments.reactCompiler sin actualizar versiones no solicitadas.
+- [x] Ejecutar instalación congelada, TypeScript y exportación Android de producción sin construir APK.
