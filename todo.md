@@ -52,3 +52,9 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [ ] Localizar los logs completos del último intento remoto que falla en Bundle JavaScript build phase.
 - [x] Comparar las versiones actuales de Expo y React Navigation con la matriz compatible del SDK 54.
 - [x] Corregir las incompatibilidades detectadas y volver a validar el bundle Android local.
+
+## Paquete de diagnóstico para revisión externa — 2026-08-15
+
+- [x] Recopilar los logs y evidencias disponibles del fallo remoto de APK.
+- [x] Identificar los archivos de configuración, dependencias e imports más relevantes para una segunda revisión.
+- [x] Entregar un informe autocontenido con los hallazgos y las limitaciones de acceso al log remoto.
