@@ -208,13 +208,13 @@ export default function HomeScreen() {
     toastTimeoutRef.current = setTimeout(() => setToast(null), duration);
   };
 
-  const savePlate = async (plate: string) => {
+  const savePlate = async (plate: string, isInRegistry: boolean) => {
     try {
       const platesFile = getPlatesFile();
       const now = new Date();
       const date = now.toLocaleDateString('es-ES');
       const time = now.toLocaleTimeString('es-ES', { hour12: false });
-      const entry = `${plate},${date},${time},REGISTRO_MATCH\n`;
+      const entry = `${plate},${date},${time},${isInRegistry ? 'EN_REGISTRO' : 'FUERA_REGISTRO'}\n`;
 
       let currentContent = '';
       const fileInfo = await platesFile.info();
@@ -267,6 +267,7 @@ export default function HomeScreen() {
 
       if (!isMatch) {
         showToast(`${detectedPlate} no en registro`, 'success');
+        await savePlate(detectedPlate, false);
         return;
       }
 
@@ -283,7 +284,7 @@ export default function HomeScreen() {
       }
 
       setTimeout(() => setFrameColor('blue'), 500);
-      await savePlate(detectedPlate);
+      await savePlate(detectedPlate, true);
     } catch (error) {
       console.error('Error during scan:', error);
       showToast('Error al escanear', 'error');

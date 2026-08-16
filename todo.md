@@ -102,3 +102,9 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Comparar la gestión actual del zoom con el checkpoint estable anterior.
 - [x] Persistir y restaurar el índice de zoom sin desincronizar el botón y CameraView.
 - [x] Validar TypeScript y bundle Android antes de entregar la corrección.
+
+## Filtros diferenciados de detecciones — 2026-08-16
+
+- [x] Conservar y mostrar todas las matrículas OCR en la pantalla principal.
+- [x] Mostrar en Historial de Ajustes únicamente las detecciones que existan en el CSV importado.
+- [x] Validar TypeScript y bundle Android antes de entregar el cambio.

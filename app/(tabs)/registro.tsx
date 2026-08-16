@@ -136,7 +136,8 @@ export default function RegistroScreen() {
             isInRegistry: plate in importedStore,
           };
         })
-        .filter((item): item is ScannedPlate => item !== null);
+        .filter((item): item is ScannedPlate => item !== null)
+        .filter((item) => item.isInRegistry);
 
       setScannedPlates(platesData.reverse());
     } catch (error) {
