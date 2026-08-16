@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AppState, AppStateStatus, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
 import { File, Paths } from 'expo-file-system';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
@@ -82,9 +82,40 @@ export default function HomeScreen() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [zoomIndex, setZoomIndex] = useState(0);
   const [isTorchOn, setIsTorchOn] = useState(false);
+  const [cameraSessionKey, setCameraSessionKey] = useState(0);
 
   const cameraRef = useRef<CameraView>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomIndexRef = useRef(0);
+  const appState = useRef(AppState.currentState);
+
+  const persistZoomIndex = async (index: number) => {
+    try {
+      await AsyncStorage.setItem(ZOOM_STORAGE_KEY, index.toString());
+    } catch (error) {
+      console.error('Error saving zoom preset:', error);
+    }
+  };
+
+  const restoreSavedZoom = async (restartCamera = false) => {
+    try {
+      const savedZoom = await AsyncStorage.getItem(ZOOM_STORAGE_KEY);
+      const parsed = savedZoom === null ? zoomIndexRef.current : Number.parseInt(savedZoom, 10);
+      const restoredIndex = !Number.isNaN(parsed) && parsed >= 0 && parsed < ZOOM_PRESETS.length
+        ? parsed
+        : 0;
+
+      zoomIndexRef.current = restoredIndex;
+      setZoomIndex(restoredIndex);
+
+      if (restartCamera) {
+        setCameraReady(false);
+        setCameraSessionKey((current) => current + 1);
+      }
+    } catch (error) {
+      console.error('Error loading saved zoom:', error);
+    }
+  };
 
   useEffect(() => {
     void (async () => {
@@ -94,8 +125,29 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    void loadSavedZoom();
+    void restoreSavedZoom();
+
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      const wasActive = appState.current === 'active';
+      const isReturningToActive = nextAppState === 'active' && appState.current !== 'active';
+
+      if (wasActive && /inactive|background/.test(nextAppState)) {
+        void persistZoomIndex(zoomIndexRef.current);
+      }
+
+      if (isReturningToActive) {
+        void restoreSavedZoom(true);
+      }
+
+      appState.current = nextAppState;
+    });
+
+    return () => subscription.remove();
   }, []);
+
+  useEffect(() => {
+    zoomIndexRef.current = zoomIndex;
+  }, [zoomIndex]);
 
   useFocusEffect(
     useCallback(() => {
@@ -104,20 +156,6 @@ export default function HomeScreen() {
       void loadScannedPlates();
     }, []),
   );
-
-  const loadSavedZoom = async () => {
-    try {
-      const savedZoom = await AsyncStorage.getItem(ZOOM_STORAGE_KEY);
-      if (savedZoom !== null) {
-        const parsed = Number.parseInt(savedZoom, 10);
-        if (!Number.isNaN(parsed) && parsed >= 0 && parsed < ZOOM_PRESETS.length) {
-          setZoomIndex(parsed);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading saved zoom:', error);
-    }
-  };
 
   const loadNotificationSettings = async () => {
     try {
@@ -253,11 +291,10 @@ export default function HomeScreen() {
   };
 
   const handleZoomPreset = () => {
-    const nextIndex = (zoomIndex + 1) % ZOOM_PRESETS.length;
+    const nextIndex = (zoomIndexRef.current + 1) % ZOOM_PRESETS.length;
+    zoomIndexRef.current = nextIndex;
     setZoomIndex(nextIndex);
-    void AsyncStorage.setItem(ZOOM_STORAGE_KEY, nextIndex.toString()).catch((error) => {
-      console.error('Error saving zoom preset:', error);
-    });
+    void persistZoomIndex(nextIndex);
   };
 
   if (hasCameraPermission === null) {
@@ -280,6 +317,7 @@ export default function HomeScreen() {
   return (
     <ScreenContainer className="flex-1 p-0">
       <CameraView
+        key={cameraSessionKey}
         ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
         zoom={ZOOM_PRESETS[zoomIndex]}

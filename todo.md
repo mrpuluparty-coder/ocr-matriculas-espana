@@ -96,3 +96,9 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Reducir el título del historial y evitar que el botón de eliminación se salga del contenedor.
 - [x] Revisar y restaurar la importación CSV robusta.
 - [x] Validar TypeScript y bundle Android antes del siguiente checkpoint.
+
+## Sincronización del zoom al recuperar foco — 2026-08-16
+
+- [x] Comparar la gestión actual del zoom con el checkpoint estable anterior.
+- [x] Persistir y restaurar el índice de zoom sin desincronizar el botón y CameraView.
+- [x] Validar TypeScript y bundle Android antes de entregar la corrección.
