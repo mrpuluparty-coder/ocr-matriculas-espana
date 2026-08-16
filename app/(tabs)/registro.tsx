@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { File, Paths } from 'expo-file-system';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useFocusEffect } from 'expo-router';
@@ -155,14 +155,20 @@ export default function RegistroScreen() {
       if (result.canceled || !result.assets?.length) return;
 
       const selectedAsset = result.assets[0];
-      const tempFile = new File(Paths.cache, 'temp_import.csv');
-      if (tempFile.exists) tempFile.delete();
+      const tempUri = `${FileSystem.cacheDirectory}temp_import.csv`;
+      await FileSystem.deleteAsync(tempUri, { idempotent: true });
+      await FileSystem.copyAsync({ from: selectedAsset.uri, to: tempUri });
 
-      await FileSystem.copyAsync({ from: selectedAsset.uri, to: tempFile.uri });
-      const lines = (await tempFile.text()).replace(/\r\n/g, '\n').split('\n').filter((line) => line.trim() !== '');
+      const csvContent = await FileSystem.readAsStringAsync(tempUri, { encoding: FileSystem.EncodingType.UTF8 });
+      const lines = csvContent
+        .replace(/^\uFEFF/, '')
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .filter((line) => line.trim() !== '');
       const newImportedPlates: Record<string, ImportedPlateData> = {};
+      const firstRowIsHeader = lines[0]?.toUpperCase().includes('MATR') ?? false;
 
-      for (let i = 1; i < lines.length; i += 1) {
+      for (let i = firstRowIsHeader ? 1 : 0; i < lines.length; i += 1) {
         const columns = lines[i].split(',');
         const plate = columns[0]?.replace(/"/g, '').trim().toUpperCase();
         if (!plate) continue;
@@ -175,7 +181,7 @@ export default function RegistroScreen() {
 
       await AsyncStorage.setItem(IMPORTED_PLATES_STORAGE_KEY, JSON.stringify(newImportedPlates));
       setImportedPlates(newImportedPlates);
-      if (tempFile.exists) tempFile.delete();
+      await FileSystem.deleteAsync(tempUri, { idempotent: true });
       Alert.alert('Éxito', `Se importaron ${Object.keys(newImportedPlates).length} matrículas correctamente.`);
       await loadScannedPlates();
     } catch (error) {
@@ -333,7 +339,7 @@ export default function RegistroScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Historial de Detecciones OCR</Text>
+            <Text style={[styles.sectionTitle, styles.sectionTitleInHeader]}>Historial</Text>
             {scannedPlates.length > 0 && (
               <TouchableOpacity style={styles.buttonSmall} onPress={handleClearOCR}>
                 <Text style={styles.buttonSmallText}>Eliminar Registros OCR</Text>
@@ -371,14 +377,15 @@ export default function RegistroScreen() {
 
 const styles = StyleSheet.create({
   section: { marginBottom: 24, backgroundColor: '#fff', padding: 16, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#11181C', marginBottom: 12 },
+  sectionTitleInHeader: { flex: 1, flexShrink: 1, marginBottom: 0 },
   subSectionTitle: { fontSize: 14, fontWeight: '600', color: '#687076', marginBottom: 8 },
   globalToggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, backgroundColor: '#F5F5F5', padding: 12, borderRadius: 8 },
   globalToggleLabel: { fontSize: 15, fontWeight: '600', color: '#11181C' },
   button: { backgroundColor: '#007AFF', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
   buttonDanger: { backgroundColor: '#FF3B30' },
-  buttonSmall: { backgroundColor: '#FF3B30', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 },
+  buttonSmall: { flexShrink: 0, backgroundColor: '#FF3B30', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 },
   buttonSmallText: { color: 'white', fontSize: 12, fontWeight: '600' },
   buttonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   helpText: { color: '#687076', fontSize: 13, lineHeight: 18, marginBottom: 12 },

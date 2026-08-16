@@ -88,3 +88,11 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Inspeccionar versiones, lockfile, instalación física, imports y configuración de NativeWind.
 - [x] Aplicar únicamente la corrección mínima para resolver react-native-css-interop/jsx-runtime.
 - [x] Validar instalación congelada, TypeScript y export Android sin construir APK.
+
+## Ajustes tras compilación exitosa — 2026-08-16
+
+- [x] Reparar el ciclo de zoom 1x → 1.5x → 2x → 4x.
+- [x] Renombrar la pestaña Registros a Ajustes y usar un icono de engranaje.
+- [x] Reducir el título del historial y evitar que el botón de eliminación se salga del contenedor.
+- [x] Revisar y restaurar la importación CSV robusta.
+- [x] Validar TypeScript y bundle Android antes del siguiente checkpoint.

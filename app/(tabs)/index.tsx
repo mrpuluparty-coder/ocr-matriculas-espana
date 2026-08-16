@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, AppStateStatus, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, CameraView } from 'expo-camera';
 import { File, Paths } from 'expo-file-system';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
@@ -85,7 +85,6 @@ export default function HomeScreen() {
 
   const cameraRef = useRef<CameraView>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const appState = useRef(AppState.currentState);
 
   useEffect(() => {
     void (async () => {
@@ -96,20 +95,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     void loadSavedZoom();
-
-    const subscription = AppState.addEventListener('change', async (nextAppState: AppStateStatus) => {
-      if (appState.current.match(/active/) && nextAppState.match(/inactive|background/)) {
-        try {
-          await AsyncStorage.setItem(ZOOM_STORAGE_KEY, zoomIndex.toString());
-        } catch (error) {
-          console.error('Error saving zoom state on background:', error);
-        }
-      }
-      appState.current = nextAppState;
-    });
-
-    return () => subscription.remove();
-  }, [zoomIndex]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -266,7 +252,13 @@ export default function HomeScreen() {
     }
   };
 
-  const handleZoomPreset = () => setZoomIndex((current) => (current + 1) % ZOOM_PRESETS.length);
+  const handleZoomPreset = () => {
+    const nextIndex = (zoomIndex + 1) % ZOOM_PRESETS.length;
+    setZoomIndex(nextIndex);
+    void AsyncStorage.setItem(ZOOM_STORAGE_KEY, nextIndex.toString()).catch((error) => {
+      console.error('Error saving zoom preset:', error);
+    });
+  };
 
   if (hasCameraPermission === null) {
     return <ScreenContainer className="flex-1 items-center justify-center"><Text>Solicitando permiso de cámara...</Text></ScreenContainer>;
