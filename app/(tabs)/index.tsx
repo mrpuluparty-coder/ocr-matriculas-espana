@@ -5,16 +5,19 @@ import { File, Paths } from 'expo-file-system';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
+import Constants from 'expo-constants';
 import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { ScreenContainer } from '@/components/screen-container';
+import { DEFAULT_SCANNER_SETTINGS, loadScannerSettings, type ScannerSettings } from '@/lib/scanner-settings';
 
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
 const NOTIFICATION_RULES_STORAGE_KEY = 'notification_rules';
 const GLOBAL_NOTIFICATIONS_KEY = 'global_notifications_active';
 const ALL_DETECTIONS_STORAGE_KEY = 'all_scanned_plate_detections';
+const RECENT_REGISTRATIONS_STORAGE_KEY = 'recent_matched_plate_registrations';
 const ZOOM_STORAGE_KEY = 'camera_zoom_index';
 const MATCHED_PLATES_FILE_NAME = 'matriculas_detectadas.csv';
 
@@ -22,8 +25,7 @@ const LOCATION_MAX_AGE_MS = 30_000;
 const LOCATION_MAX_ACCURACY_METERS = 75;
 const LOCATION_UPDATE_INTERVAL_MS = 5_000;
 const LOCATION_UPDATE_DISTANCE_METERS = 5;
-const VIDEO_OCR_INTERVAL_MS = 1_000;
-const DUPLICATE_REGISTRATION_WINDOW_MS = 60_000;
+const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 
 const ZOOM_PRESETS = [0.0, 0.2, 0.33, 0.66];
 const ZOOM_LABELS = ['1x', '1.5x', '2x', '4x'];
@@ -46,6 +48,7 @@ interface ScannedPlateItem {
 
 interface StoredDetection {
   plate: string;
+  timestamp?: number;
 }
 
 interface NotificationRule {
@@ -94,7 +97,8 @@ function parseStoredDetections(rawValue: string | null): StoredDetection[] {
 
     return parsed.reduce<StoredDetection[]>((entries, entry) => {
       const plate = typeof entry === 'string' ? entry : entry?.plate;
-      if (typeof plate === 'string' && plate.trim()) entries.push({ plate: plate.trim().toUpperCase() });
+      const timestamp = typeof entry === 'object' && typeof entry?.timestamp === 'number' ? entry.timestamp : undefined;
+      if (typeof plate === 'string' && plate.trim()) entries.push({ plate: plate.trim().toUpperCase(), timestamp });
       return entries;
     }, []);
   } catch (error) {
@@ -124,6 +128,7 @@ export default function HomeScreen() {
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('checking');
   const [scanMode, setScanMode] = useState<ScanMode>('manual');
   const [isScreenFocused, setIsScreenFocused] = useState(false);
+  const [scannerSettings, setScannerSettings] = useState<ScannerSettings>(DEFAULT_SCANNER_SETTINGS);
 
   const cameraRef = useRef<CameraView>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,12 +145,13 @@ export default function HomeScreen() {
   const isStartingLocationRef = useRef(false);
   const videoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastRegisteredAtRef = useRef<Map<string, number>>(new Map());
+  const scannerSettingsRef = useRef<ScannerSettings>(DEFAULT_SCANNER_SETTINGS);
 
   const showToast = (message: string, type: Toast['type']) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     const toastId = Date.now().toString();
     setToast({ id: toastId, message, type });
-    const duration = type === 'custom_notification' ? 3_000 : 1_000;
+    const duration = Math.round(scannerSettingsRef.current.toastDurationSeconds * 1_000);
     toastTimeoutRef.current = setTimeout(() => setToast(null), duration);
   };
 
@@ -288,6 +294,25 @@ export default function HomeScreen() {
     }
   };
 
+  const loadOperationalSettings = async () => {
+    const settings = await loadScannerSettings();
+    scannerSettingsRef.current = settings;
+    setScannerSettings(settings);
+  };
+
+  const loadRecentRegistrations = async () => {
+    try {
+      const rawValue = await AsyncStorage.getItem(RECENT_REGISTRATIONS_STORAGE_KEY);
+      const stored = rawValue ? JSON.parse(rawValue) : {};
+      if (!stored || typeof stored !== 'object') return;
+      lastRegisteredAtRef.current = new Map(
+        Object.entries(stored).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+      );
+    } catch (error) {
+      console.error('Error loading recent registrations:', error);
+    }
+  };
+
   const loadImportedPlates = async () => {
     const importedStore = parseImportedPlateStore(await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY));
     setImportedPlates(importedStore);
@@ -331,13 +356,19 @@ export default function HomeScreen() {
 
   const saveDetectionForMainList = async (plate: string) => {
     const entries = await readAllDetectedPlates();
-    const nextEntries = [...entries, { plate }];
+    const now = Date.now();
+    const latestSamePlate = [...entries].reverse().find((entry) => entry.plate === plate);
+    const duplicateWindowMs = scannerSettingsRef.current.duplicateWindowSeconds * 1_000;
+    if (latestSamePlate?.timestamp && now - latestSamePlate.timestamp < duplicateWindowMs) return false;
+
+    const nextEntries = [...entries, { plate, timestamp: now }];
     await AsyncStorage.setItem(ALL_DETECTIONS_STORAGE_KEY, JSON.stringify(nextEntries));
     setScannedPlates(
       nextEntries
         .map((entry) => ({ plate: entry.plate, isInRegistry: entry.plate in importedPlatesRef.current }))
         .reverse(),
     );
+    return true;
   };
 
   const saveMatchedPlateWithLocation = async (plate: string, location: Location.LocationObject) => {
@@ -361,7 +392,16 @@ export default function HomeScreen() {
 
   const isRecentlyRegistered = (plate: string) => {
     const lastRegisteredAt = lastRegisteredAtRef.current.get(plate);
-    return lastRegisteredAt !== undefined && Date.now() - lastRegisteredAt < DUPLICATE_REGISTRATION_WINDOW_MS;
+    return lastRegisteredAt !== undefined && Date.now() - lastRegisteredAt < scannerSettingsRef.current.duplicateWindowSeconds * 1_000;
+  };
+
+  const rememberRegistration = async (plate: string) => {
+    const now = Date.now();
+    lastRegisteredAtRef.current.set(plate, now);
+    await AsyncStorage.setItem(
+      RECENT_REGISTRATIONS_STORAGE_KEY,
+      JSON.stringify(Object.fromEntries(lastRegisteredAtRef.current.entries())),
+    );
   };
 
   const processCurrentFrame = async (automatic: boolean) => {
@@ -415,7 +455,7 @@ export default function HomeScreen() {
       }
 
       await saveMatchedPlateWithLocation(detectedPlate, location);
-      lastRegisteredAtRef.current.set(detectedPlate, Date.now());
+      await rememberRegistration(detectedPlate);
 
       const rule = notificationRulesRef.current[detectedPlate];
       const savedLocationMessage = '📍 Ubicación guardada';
@@ -482,11 +522,17 @@ export default function HomeScreen() {
     scanModeRef.current = scanMode;
   }, [scanMode]);
 
+  useEffect(() => {
+    scannerSettingsRef.current = scannerSettings;
+  }, [scannerSettings]);
+
   useFocusEffect(
     useCallback(() => {
       isScreenFocusedRef.current = true;
       setIsScreenFocused(true);
       void loadNotificationSettings();
+      void loadOperationalSettings();
+      void loadRecentRegistrations();
       void loadImportedPlates();
       void loadScannedPlates();
 
@@ -521,13 +567,13 @@ export default function HomeScreen() {
 
     const scanFrame = () => void processCurrentFrame(true);
     scanFrame();
-    videoIntervalRef.current = setInterval(scanFrame, VIDEO_OCR_INTERVAL_MS);
+    videoIntervalRef.current = setInterval(scanFrame, scannerSettings.videoIntervalSeconds * 1_000);
 
     return () => {
       if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
       videoIntervalRef.current = null;
     };
-  }, [scanMode, isScreenFocused, cameraReady]);
+  }, [scanMode, isScreenFocused, cameraReady, scannerSettings.videoIntervalSeconds]);
 
   const handleZoomPreset = () => {
     const nextIndex = (zoomIndexRef.current + 1) % ZOOM_PRESETS.length;
@@ -591,6 +637,7 @@ export default function HomeScreen() {
           <MaterialIcons name={gpsPresentation.icon} size={16} color={gpsPresentation.color} />
           <Text style={[styles.gpsBadgeText, { color: gpsPresentation.color }]}>{gpsPresentation.label}</Text>
         </View>
+        <Text style={styles.versionLabel} pointerEvents="none">v{APP_VERSION}</Text>
 
         {toast && (
           <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]} pointerEvents="none">
@@ -661,6 +708,7 @@ const styles = StyleSheet.create({
   focusFrame: { position: 'absolute', top: '25%', left: '10%', right: '10%', height: 120, borderWidth: 3, borderRadius: 12, backgroundColor: 'transparent' },
   gpsBadge: { position: 'absolute', top: 14, left: 16, flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 9, borderWidth: 1, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 100 },
   gpsBadgeText: { fontSize: 12, fontWeight: '700' },
+  versionLabel: { position: 'absolute', top: 20, right: 16, color: 'white', fontSize: 12, fontWeight: '600', opacity: 0.4 },
   toast: { position: 'absolute', top: 58, alignSelf: 'center', maxWidth: '86%', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, zIndex: 100 },
   toastText: { color: 'white', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
   modeSelector: { flexDirection: 'row', marginBottom: 10, borderRadius: 18, padding: 3, backgroundColor: 'rgba(0,0,0,0.62)' },

@@ -117,3 +117,13 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Registrar solo coincidencias CSV con coordenadas recientes y aplicar deduplicación temporal de 60 segundos.
 - [x] Añadir selector Manual/Vídeo y OCR aproximado de un fotograma por segundo sin ejecuciones simultáneas.
 - [x] Ejecutar instalación congelada, TypeScript y export Android; no construir APK.
+
+## Reorganización Cámara, Registros y Ajustes — 2026-08-17
+
+- [x] Mostrar versión de la app junto al indicador GPS en Cámara.
+- [x] Aplicar deduplicación temporal también a los listados de Cámara y Registros.
+- [x] Aumentar los toasts de coincidencia CSV a 2,5 segundos y permitir configurar los tres tiempos operativos.
+- [x] Mejorar el modal de alertas con placeholder y comportamiento compatible con teclado.
+- [x] Crear la pestaña Registros y trasladar importación CSV e Historial sin cambiar sus datos.
+- [x] Renombrar Home como Cámara y mantener Ajustes para alertas y preferencias.
+- [x] Validar TypeScript y bundle Android antes de entregar los cambios.
