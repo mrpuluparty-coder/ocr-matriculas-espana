@@ -6,12 +6,14 @@ export interface ScannerSettings {
   videoIntervalSeconds: number;
   duplicateWindowSeconds: number;
   toastDurationSeconds: number;
+  gpsUpdateIntervalSeconds: number;
 }
 
 export const DEFAULT_SCANNER_SETTINGS: ScannerSettings = {
   videoIntervalSeconds: 1,
   duplicateWindowSeconds: 60,
   toastDurationSeconds: 2.5,
+  gpsUpdateIntervalSeconds: 5,
 };
 
 function toValidSeconds(value: unknown, fallback: number) {
@@ -25,6 +27,7 @@ export function normalizeScannerSettings(value: unknown): ScannerSettings {
     videoIntervalSeconds: toValidSeconds(source.videoIntervalSeconds, DEFAULT_SCANNER_SETTINGS.videoIntervalSeconds),
     duplicateWindowSeconds: toValidSeconds(source.duplicateWindowSeconds, DEFAULT_SCANNER_SETTINGS.duplicateWindowSeconds),
     toastDurationSeconds: toValidSeconds(source.toastDurationSeconds, DEFAULT_SCANNER_SETTINGS.toastDurationSeconds),
+    gpsUpdateIntervalSeconds: toValidSeconds(source.gpsUpdateIntervalSeconds, DEFAULT_SCANNER_SETTINGS.gpsUpdateIntervalSeconds),
   };
 }
 

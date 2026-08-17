@@ -21,6 +21,7 @@ interface TimeInputs {
   videoIntervalSeconds: string;
   duplicateWindowSeconds: string;
   toastDurationSeconds: string;
+  gpsUpdateIntervalSeconds: string;
 }
 
 function toTimeInputs(settings: ScannerSettings): TimeInputs {
@@ -28,6 +29,7 @@ function toTimeInputs(settings: ScannerSettings): TimeInputs {
     videoIntervalSeconds: String(settings.videoIntervalSeconds),
     duplicateWindowSeconds: String(settings.duplicateWindowSeconds),
     toastDurationSeconds: String(settings.toastDurationSeconds),
+    gpsUpdateIntervalSeconds: String(settings.gpsUpdateIntervalSeconds),
   };
 }
 
@@ -78,6 +80,7 @@ export default function AjustesScreen() {
         videoIntervalSeconds: Number(timeInputs.videoIntervalSeconds),
         duplicateWindowSeconds: Number(timeInputs.duplicateWindowSeconds),
         toastDurationSeconds: Number(timeInputs.toastDurationSeconds),
+        gpsUpdateIntervalSeconds: Number(timeInputs.gpsUpdateIntervalSeconds),
       });
       const saved = await saveScannerSettings(settings);
       setTimeInputs(toTimeInputs(saved));
@@ -151,6 +154,10 @@ export default function AjustesScreen() {
           <View style={styles.timeField}>
             <Text style={styles.timeLabel}>Mostrar toast</Text>
             <TextInput style={styles.timeInput} value={timeInputs.toastDurationSeconds} onChangeText={(value) => setTimeInputs((current) => ({ ...current, toastDurationSeconds: value }))} keyboardType="decimal-pad" />
+          </View>
+          <View style={styles.timeField}>
+            <Text style={styles.timeLabel}>Intervalo de actualización GPS</Text>
+            <TextInput style={styles.timeInput} value={timeInputs.gpsUpdateIntervalSeconds} onChangeText={(value) => setTimeInputs((current) => ({ ...current, gpsUpdateIntervalSeconds: value }))} keyboardType="decimal-pad" />
           </View>
           <TouchableOpacity style={styles.button} onPress={() => void handleSaveTimes()}>
             <Text style={styles.buttonText}>Guardar tiempos</Text>

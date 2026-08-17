@@ -127,3 +127,11 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Crear la pestaña Registros y trasladar importación CSV e Historial sin cambiar sus datos.
 - [x] Renombrar Home como Cámara y mantener Ajustes para alertas y preferencias.
 - [x] Validar TypeScript y bundle Android antes de entregar los cambios.
+
+## Estabilidad de cámara y ajustes operativos — 2026-08-17
+
+- [x] Diagnosticar el ciclo AppState/CameraView y la causa probable del preview negro al reanudar.
+- [x] Aplicar deduplicación común a Manual y Vídeo con alertas personalizadas prioritarias.
+- [x] Añadir el intervalo GPS configurable y persistido en Ajustes.
+- [x] Recuperar zoom y cámara sin remount forzado al volver a foreground.
+- [x] Validar TypeScript, bundle Android y escenarios de ciclo de vida.

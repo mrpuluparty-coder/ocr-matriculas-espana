@@ -23,7 +23,6 @@ const MATCHED_PLATES_FILE_NAME = 'matriculas_detectadas.csv';
 
 const LOCATION_MAX_AGE_MS = 30_000;
 const LOCATION_MAX_ACCURACY_METERS = 75;
-const LOCATION_UPDATE_INTERVAL_MS = 5_000;
 const LOCATION_UPDATE_DISTANCE_METERS = 5;
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 
@@ -124,10 +123,10 @@ export default function HomeScreen() {
   const [toast, setToast] = useState<Toast | null>(null);
   const [zoomIndex, setZoomIndex] = useState(0);
   const [isTorchOn, setIsTorchOn] = useState(false);
-  const [cameraSessionKey, setCameraSessionKey] = useState(0);
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('checking');
   const [scanMode, setScanMode] = useState<ScanMode>('manual');
   const [isScreenFocused, setIsScreenFocused] = useState(false);
+  const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
   const [scannerSettings, setScannerSettings] = useState<ScannerSettings>(DEFAULT_SCANNER_SETTINGS);
 
   const cameraRef = useRef<CameraView>(null);
@@ -139,6 +138,7 @@ export default function HomeScreen() {
   const globalNotificationsRef = useRef(true);
   const scanModeRef = useRef<ScanMode>('manual');
   const isScreenFocusedRef = useRef(false);
+  const isAppActiveRef = useRef(AppState.currentState === 'active');
   const isProcessingRef = useRef(false);
   const latestLocationRef = useRef<Location.LocationObject | null>(null);
   const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
@@ -163,7 +163,7 @@ export default function HomeScreen() {
     }
   };
 
-  const restoreSavedZoom = async (restartCamera = false) => {
+  const restoreSavedZoom = async () => {
     try {
       const savedZoom = await AsyncStorage.getItem(ZOOM_STORAGE_KEY);
       const parsed = savedZoom === null ? zoomIndexRef.current : Number.parseInt(savedZoom, 10);
@@ -171,11 +171,6 @@ export default function HomeScreen() {
 
       zoomIndexRef.current = restoredIndex;
       setZoomIndex(restoredIndex);
-
-      if (restartCamera) {
-        setCameraReady(false);
-        setCameraSessionKey((current) => current + 1);
-      }
     } catch (error) {
       console.error('Error loading saved zoom:', error);
     }
@@ -184,6 +179,26 @@ export default function HomeScreen() {
   const stopLocationTracking = () => {
     locationSubscriptionRef.current?.remove();
     locationSubscriptionRef.current = null;
+  };
+
+  const pauseCameraPreview = async () => {
+    setCameraReady(false);
+    try {
+      await cameraRef.current?.pausePreview();
+    } catch (error) {
+      console.warn('Error pausing camera preview:', error);
+    }
+  };
+
+  const resumeCameraPreview = async () => {
+    try {
+      if (!cameraRef.current) return;
+      await cameraRef.current.resumePreview();
+      if (isAppActiveRef.current && isScreenFocusedRef.current) setCameraReady(true);
+    } catch (error) {
+      console.warn('Error resuming camera preview:', error);
+      setCameraReady(false);
+    }
   };
 
   const acceptLocation = (location: Location.LocationObject) => {
@@ -228,7 +243,7 @@ export default function HomeScreen() {
       locationSubscriptionRef.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: LOCATION_UPDATE_INTERVAL_MS,
+          timeInterval: scannerSettingsRef.current.gpsUpdateIntervalSeconds * 1_000,
           distanceInterval: LOCATION_UPDATE_DISTANCE_METERS,
           mayShowUserSettingsDialog: true,
         },
@@ -405,7 +420,7 @@ export default function HomeScreen() {
   };
 
   const processCurrentFrame = async (automatic: boolean) => {
-    if (isProcessingRef.current || !cameraRef.current || !cameraReady) return;
+    if (isProcessingRef.current || !isAppActiveRef.current || !cameraRef.current || !cameraReady) return;
 
     isProcessingRef.current = true;
     try {
@@ -422,7 +437,7 @@ export default function HomeScreen() {
       }
 
       const result = await TextRecognition.recognize(photo.uri);
-      if (!isScreenFocusedRef.current || (automatic && scanModeRef.current !== 'video')) return;
+      if (!isAppActiveRef.current || !isScreenFocusedRef.current || (automatic && scanModeRef.current !== 'video')) return;
 
       const cleanText = result.text.replace(/[^A-Z0-9]/gi, '').toUpperCase();
       const match = cleanText.match(/\d{4}[B-DF-HJ-NP-TV-Z]{3}/);
@@ -433,9 +448,16 @@ export default function HomeScreen() {
 
       const detectedPlate = match[0];
       await saveDetectionForMainList(detectedPlate);
+      const rule = notificationRulesRef.current[detectedPlate];
+      const hasCustomAlert = Boolean(globalNotificationsRef.current && rule?.active && rule.message);
+      const showCustomAlert = (locationSaved = false) => {
+        const suffix = locationSaved ? '\n📍 Ubicación guardada' : '';
+        showToast(`🔔 ${rule?.message}${suffix}`, 'custom_notification');
+      };
 
       if (!(detectedPlate in importedPlatesRef.current)) {
-        if (!automatic) showToast(`${detectedPlate} no en registro`, 'success');
+        if (hasCustomAlert) showCustomAlert();
+        else if (!automatic) showToast(`${detectedPlate} no en registro`, 'success');
         return;
       }
 
@@ -444,25 +466,25 @@ export default function HomeScreen() {
       setTimeout(() => setFrameColor('blue'), 500);
 
       if (isRecentlyRegistered(detectedPlate)) {
-        if (!automatic) showToast(`${detectedPlate} ya se registró recientemente`, 'warning');
+        if (hasCustomAlert) showCustomAlert();
+        else if (!automatic) showToast(`${detectedPlate} ya se registró recientemente`, 'warning');
         return;
       }
 
       const location = await getFreshLocationForRegistration();
       if (!location) {
-        showToast(`${detectedPlate} está en el registro, pero no hay una ubicación GPS válida`, 'error');
+        if (hasCustomAlert) showCustomAlert();
+        else showToast(`${detectedPlate} está en el registro, pero no hay una ubicación GPS válida`, 'error');
         return;
       }
 
       await saveMatchedPlateWithLocation(detectedPlate, location);
       await rememberRegistration(detectedPlate);
 
-      const rule = notificationRulesRef.current[detectedPlate];
-      const savedLocationMessage = '📍 Ubicación guardada';
-      if (globalNotificationsRef.current && rule?.active && rule.message) {
-        showToast(`🔔 ${rule.message}\n${savedLocationMessage}`, 'custom_notification');
+      if (hasCustomAlert) {
+        showCustomAlert(true);
       } else {
-        showToast(`¡${detectedPlate} está en el registro!\n${savedLocationMessage}`, 'warning');
+        showToast(`¡${detectedPlate} está en el registro!\n📍 Ubicación guardada`, 'warning');
       }
     } catch (error) {
       console.error('Error during scan:', error);
@@ -487,12 +509,18 @@ export default function HomeScreen() {
       const isReturningToActive = nextAppState === 'active' && appState.current !== 'active';
 
       if (wasActive && /inactive|background/.test(nextAppState)) {
+        isAppActiveRef.current = false;
+        setIsAppActive(false);
         void persistZoomIndex(zoomIndexRef.current);
+        void pauseCameraPreview();
         stopLocationTracking();
       }
 
       if (isReturningToActive) {
-        void restoreSavedZoom(true);
+        isAppActiveRef.current = true;
+        setIsAppActive(true);
+        void restoreSavedZoom();
+        void resumeCameraPreview();
         if (isScreenFocusedRef.current) void ensureLocationTracking();
       }
 
@@ -539,6 +567,7 @@ export default function HomeScreen() {
       return () => {
         isScreenFocusedRef.current = false;
         setIsScreenFocused(false);
+        setCameraReady(false);
       };
     }, []),
   );
@@ -555,7 +584,7 @@ export default function HomeScreen() {
       clearInterval(statusTimer);
       stopLocationTracking();
     };
-  }, [isScreenFocused]);
+  }, [isScreenFocused, scannerSettings.gpsUpdateIntervalSeconds]);
 
   useEffect(() => {
     if (videoIntervalRef.current) {
@@ -563,7 +592,7 @@ export default function HomeScreen() {
       videoIntervalRef.current = null;
     }
 
-    if (scanMode !== 'video' || !isScreenFocused || !cameraReady) return;
+    if (scanMode !== 'video' || !isScreenFocused || !isAppActive || !cameraReady) return;
 
     const scanFrame = () => void processCurrentFrame(true);
     scanFrame();
@@ -573,7 +602,7 @@ export default function HomeScreen() {
       if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
       videoIntervalRef.current = null;
     };
-  }, [scanMode, isScreenFocused, cameraReady, scannerSettings.videoIntervalSeconds]);
+  }, [scanMode, isScreenFocused, isAppActive, cameraReady, scannerSettings.videoIntervalSeconds]);
 
   const handleZoomPreset = () => {
     const nextIndex = (zoomIndexRef.current + 1) % ZOOM_PRESETS.length;
@@ -620,15 +649,18 @@ export default function HomeScreen() {
 
   return (
     <ScreenContainer className="flex-1 p-0">
-      <CameraView
-        key={cameraSessionKey}
-        ref={cameraRef}
-        style={StyleSheet.absoluteFillObject}
-        zoom={ZOOM_PRESETS[zoomIndex]}
-        enableTorch={isTorchOn}
-        onCameraReady={() => setCameraReady(true)}
-        facing="back"
-      />
+      {isScreenFocused && (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFillObject}
+          zoom={ZOOM_PRESETS[zoomIndex]}
+          enableTorch={isTorchOn}
+          onCameraReady={() => {
+            if (isAppActiveRef.current) setCameraReady(true);
+          }}
+          facing="back"
+        />
+      )}
 
       <View style={styles.overlayContainer} pointerEvents="box-none">
         <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} pointerEvents="none" />
