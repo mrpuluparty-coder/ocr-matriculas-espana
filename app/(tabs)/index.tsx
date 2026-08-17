@@ -4,6 +4,7 @@ import { Camera, CameraView } from 'expo-camera';
 import { File, Paths } from 'expo-file-system';
 import TextRecognition from '@react-native-ml-kit/text-recognition';
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
 import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -13,10 +14,24 @@ import { ScreenContainer } from '@/components/screen-container';
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
 const NOTIFICATION_RULES_STORAGE_KEY = 'notification_rules';
 const GLOBAL_NOTIFICATIONS_KEY = 'global_notifications_active';
+const ALL_DETECTIONS_STORAGE_KEY = 'all_scanned_plate_detections';
 const ZOOM_STORAGE_KEY = 'camera_zoom_index';
-const PLATES_FILE_NAME = 'matriculas_detectadas.csv';
+const MATCHED_PLATES_FILE_NAME = 'matriculas_detectadas.csv';
 
-const getPlatesFile = () => new File(Paths.document, PLATES_FILE_NAME);
+const LOCATION_MAX_AGE_MS = 30_000;
+const LOCATION_MAX_ACCURACY_METERS = 75;
+const LOCATION_UPDATE_INTERVAL_MS = 5_000;
+const LOCATION_UPDATE_DISTANCE_METERS = 5;
+const VIDEO_OCR_INTERVAL_MS = 1_000;
+const DUPLICATE_REGISTRATION_WINDOW_MS = 60_000;
+
+const ZOOM_PRESETS = [0.0, 0.2, 0.33, 0.66];
+const ZOOM_LABELS = ['1x', '1.5x', '2x', '4x'];
+
+const getMatchedPlatesFile = () => new File(Paths.document, MATCHED_PLATES_FILE_NAME);
+
+type ScanMode = 'manual' | 'video';
+type GpsStatus = 'checking' | 'active' | 'permission_denied' | 'services_disabled' | 'waiting' | 'unavailable';
 
 interface Toast {
   id: string;
@@ -29,6 +44,10 @@ interface ScannedPlateItem {
   isInRegistry: boolean;
 }
 
+interface StoredDetection {
+  plate: string;
+}
+
 interface NotificationRule {
   plate: string;
   message: string;
@@ -37,9 +56,6 @@ interface NotificationRule {
 
 type ImportedPlateStore = Record<string, { fecha?: string; hora?: string }>;
 
-const ZOOM_PRESETS = [0.0, 0.2, 0.33, 0.66];
-const ZOOM_LABELS = ['1x', '1.5x', '2x', '4x'];
-
 function parseImportedPlateStore(rawValue: string | null): ImportedPlateStore {
   if (!rawValue) return {};
 
@@ -47,9 +63,7 @@ function parseImportedPlateStore(rawValue: string | null): ImportedPlateStore {
     const parsed = JSON.parse(rawValue);
     if (Array.isArray(parsed)) {
       return parsed.reduce<ImportedPlateStore>((store, plate) => {
-        if (typeof plate === 'string' && plate.trim()) {
-          store[plate.trim().toUpperCase()] = {};
-        }
+        if (typeof plate === 'string' && plate.trim()) store[plate.trim().toUpperCase()] = {};
         return store;
       }, {});
     }
@@ -71,6 +85,30 @@ function parseImportedPlateStore(rawValue: string | null): ImportedPlateStore {
   return {};
 }
 
+function parseStoredDetections(rawValue: string | null): StoredDetection[] {
+  if (!rawValue) return [];
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.reduce<StoredDetection[]>((entries, entry) => {
+      const plate = typeof entry === 'string' ? entry : entry?.plate;
+      if (typeof plate === 'string' && plate.trim()) entries.push({ plate: plate.trim().toUpperCase() });
+      return entries;
+    }, []);
+  } catch (error) {
+    console.error('Error parsing stored detections:', error);
+    return [];
+  }
+}
+
+function isFreshAccurateLocation(location: Location.LocationObject | null): location is Location.LocationObject {
+  if (!location) return false;
+  const accuracy = location.coords.accuracy ?? Number.POSITIVE_INFINITY;
+  return Date.now() - location.timestamp <= LOCATION_MAX_AGE_MS && accuracy <= LOCATION_MAX_ACCURACY_METERS;
+}
+
 export default function HomeScreen() {
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [scannedPlates, setScannedPlates] = useState<ScannedPlateItem[]>([]);
@@ -83,11 +121,33 @@ export default function HomeScreen() {
   const [zoomIndex, setZoomIndex] = useState(0);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [cameraSessionKey, setCameraSessionKey] = useState(0);
+  const [gpsStatus, setGpsStatus] = useState<GpsStatus>('checking');
+  const [scanMode, setScanMode] = useState<ScanMode>('manual');
+  const [isScreenFocused, setIsScreenFocused] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomIndexRef = useRef(0);
   const appState = useRef(AppState.currentState);
+  const importedPlatesRef = useRef<ImportedPlateStore>({});
+  const notificationRulesRef = useRef<Record<string, NotificationRule>>({});
+  const globalNotificationsRef = useRef(true);
+  const scanModeRef = useRef<ScanMode>('manual');
+  const isScreenFocusedRef = useRef(false);
+  const isProcessingRef = useRef(false);
+  const latestLocationRef = useRef<Location.LocationObject | null>(null);
+  const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const isStartingLocationRef = useRef(false);
+  const videoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastRegisteredAtRef = useRef<Map<string, number>>(new Map());
+
+  const showToast = (message: string, type: Toast['type']) => {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    const toastId = Date.now().toString();
+    setToast({ id: toastId, message, type });
+    const duration = type === 'custom_notification' ? 3_000 : 1_000;
+    toastTimeoutRef.current = setTimeout(() => setToast(null), duration);
+  };
 
   const persistZoomIndex = async (index: number) => {
     try {
@@ -101,9 +161,7 @@ export default function HomeScreen() {
     try {
       const savedZoom = await AsyncStorage.getItem(ZOOM_STORAGE_KEY);
       const parsed = savedZoom === null ? zoomIndexRef.current : Number.parseInt(savedZoom, 10);
-      const restoredIndex = !Number.isNaN(parsed) && parsed >= 0 && parsed < ZOOM_PRESETS.length
-        ? parsed
-        : 0;
+      const restoredIndex = !Number.isNaN(parsed) && parsed >= 0 && parsed < ZOOM_PRESETS.length ? parsed : 0;
 
       zoomIndexRef.current = restoredIndex;
       setZoomIndex(restoredIndex);
@@ -114,6 +172,263 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error('Error loading saved zoom:', error);
+    }
+  };
+
+  const stopLocationTracking = () => {
+    locationSubscriptionRef.current?.remove();
+    locationSubscriptionRef.current = null;
+  };
+
+  const acceptLocation = (location: Location.LocationObject) => {
+    latestLocationRef.current = location;
+    setGpsStatus(isFreshAccurateLocation(location) ? 'active' : 'waiting');
+  };
+
+  const ensureLocationTracking = async () => {
+    if (Platform.OS === 'web') {
+      setGpsStatus('unavailable');
+      return;
+    }
+    if (isStartingLocationRef.current || locationSubscriptionRef.current) return;
+
+    isStartingLocationRef.current = true;
+    setGpsStatus('checking');
+
+    try {
+      let permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== 'granted') permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        latestLocationRef.current = null;
+        setGpsStatus('permission_denied');
+        return;
+      }
+
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        latestLocationRef.current = null;
+        stopLocationTracking();
+        setGpsStatus('services_disabled');
+        return;
+      }
+
+      setGpsStatus('waiting');
+      const lastKnown = await Location.getLastKnownPositionAsync({
+        maxAge: LOCATION_MAX_AGE_MS,
+        requiredAccuracy: LOCATION_MAX_ACCURACY_METERS,
+      });
+      if (lastKnown) acceptLocation(lastKnown);
+
+      locationSubscriptionRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: LOCATION_UPDATE_INTERVAL_MS,
+          distanceInterval: LOCATION_UPDATE_DISTANCE_METERS,
+          mayShowUserSettingsDialog: true,
+        },
+        acceptLocation,
+        () => setGpsStatus('unavailable'),
+      );
+    } catch (error) {
+      console.error('Error starting location tracking:', error);
+      setGpsStatus('unavailable');
+    } finally {
+      isStartingLocationRef.current = false;
+    }
+  };
+
+  const refreshLocationService = async () => {
+    if (Platform.OS === 'web') {
+      setGpsStatus('unavailable');
+      return;
+    }
+
+    try {
+      const permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        latestLocationRef.current = null;
+        stopLocationTracking();
+        setGpsStatus('permission_denied');
+        return;
+      }
+
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        latestLocationRef.current = null;
+        stopLocationTracking();
+        setGpsStatus('services_disabled');
+        return;
+      }
+
+      if (!locationSubscriptionRef.current) void ensureLocationTracking();
+    } catch (error) {
+      console.error('Error refreshing location service:', error);
+      setGpsStatus('unavailable');
+    }
+  };
+
+  const getFreshLocationForRegistration = async () => {
+    await refreshLocationService();
+    const location = latestLocationRef.current;
+    if (isFreshAccurateLocation(location)) return location;
+
+    setGpsStatus('waiting');
+    return null;
+  };
+
+  const loadNotificationSettings = async () => {
+    try {
+      const storedRules = await AsyncStorage.getItem(NOTIFICATION_RULES_STORAGE_KEY);
+      if (storedRules) setNotificationRules(JSON.parse(storedRules));
+
+      const storedGlobal = await AsyncStorage.getItem(GLOBAL_NOTIFICATIONS_KEY);
+      if (storedGlobal !== null) setGlobalNotificationsActive(JSON.parse(storedGlobal));
+    } catch (error) {
+      console.error('Error loading notification settings:', error);
+    }
+  };
+
+  const loadImportedPlates = async () => {
+    const importedStore = parseImportedPlateStore(await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY));
+    setImportedPlates(importedStore);
+  };
+
+  const readAllDetectedPlates = async (): Promise<StoredDetection[]> => {
+    const stored = parseStoredDetections(await AsyncStorage.getItem(ALL_DETECTIONS_STORAGE_KEY));
+    if (stored.length > 0) return stored;
+
+    try {
+      const legacyFile = getMatchedPlatesFile();
+      if (!(await legacyFile.info()).exists) return [];
+      const migrated = (await legacyFile.text())
+        .split('\n')
+        .filter(Boolean)
+        .slice(1)
+        .map((line) => line.split(',')[0]?.trim().toUpperCase())
+        .filter((plate): plate is string => Boolean(plate))
+        .map((plate) => ({ plate }));
+      if (migrated.length > 0) await AsyncStorage.setItem(ALL_DETECTIONS_STORAGE_KEY, JSON.stringify(migrated));
+      return migrated;
+    } catch (error) {
+      console.error('Error migrating detection history:', error);
+      return [];
+    }
+  };
+
+  const loadScannedPlates = async () => {
+    try {
+      const allDetections = await readAllDetectedPlates();
+      const importedStore = parseImportedPlateStore(await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY));
+      setScannedPlates(
+        allDetections
+          .map(({ plate }) => ({ plate, isInRegistry: plate in importedStore }))
+          .reverse(),
+      );
+    } catch (error) {
+      console.error('Error loading scanned plates:', error);
+    }
+  };
+
+  const saveDetectionForMainList = async (plate: string) => {
+    const entries = await readAllDetectedPlates();
+    const nextEntries = [...entries, { plate }];
+    await AsyncStorage.setItem(ALL_DETECTIONS_STORAGE_KEY, JSON.stringify(nextEntries));
+    setScannedPlates(
+      nextEntries
+        .map((entry) => ({ plate: entry.plate, isInRegistry: entry.plate in importedPlatesRef.current }))
+        .reverse(),
+    );
+  };
+
+  const saveMatchedPlateWithLocation = async (plate: string, location: Location.LocationObject) => {
+    const matchedFile = getMatchedPlatesFile();
+    const now = new Date();
+    const date = now.toLocaleDateString('es-ES');
+    const time = now.toLocaleTimeString('es-ES', { hour12: false });
+    const coordinates = `${location.coords.latitude},${location.coords.longitude}`;
+    const entry = `${plate},${date},${time},"${coordinates}"\n`;
+
+    let currentContent = '';
+    if ((await matchedFile.info()).exists) {
+      currentContent = await matchedFile.text();
+    } else {
+      await matchedFile.create();
+      currentContent = 'MATRÍCULA,FECHA,HORA,LATITUD/LONGITUD\n';
+    }
+
+    await matchedFile.write(currentContent + entry);
+  };
+
+  const isRecentlyRegistered = (plate: string) => {
+    const lastRegisteredAt = lastRegisteredAtRef.current.get(plate);
+    return lastRegisteredAt !== undefined && Date.now() - lastRegisteredAt < DUPLICATE_REGISTRATION_WINDOW_MS;
+  };
+
+  const processCurrentFrame = async (automatic: boolean) => {
+    if (isProcessingRef.current || !cameraRef.current || !cameraReady) return;
+
+    isProcessingRef.current = true;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.85,
+        base64: false,
+        exif: false,
+        skipProcessing: true,
+      });
+
+      if (!photo.uri) {
+        if (!automatic) showToast('Error al capturar la imagen', 'error');
+        return;
+      }
+
+      const result = await TextRecognition.recognize(photo.uri);
+      if (!isScreenFocusedRef.current || (automatic && scanModeRef.current !== 'video')) return;
+
+      const cleanText = result.text.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      const match = cleanText.match(/\d{4}[B-DF-HJ-NP-TV-Z]{3}/);
+      if (!match?.[0]) {
+        if (!automatic) showToast('No se detectó matrícula válida', 'error');
+        return;
+      }
+
+      const detectedPlate = match[0];
+      await saveDetectionForMainList(detectedPlate);
+
+      if (!(detectedPlate in importedPlatesRef.current)) {
+        if (!automatic) showToast(`${detectedPlate} no en registro`, 'success');
+        return;
+      }
+
+      setFrameColor('red');
+      if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setTimeout(() => setFrameColor('blue'), 500);
+
+      if (isRecentlyRegistered(detectedPlate)) {
+        if (!automatic) showToast(`${detectedPlate} ya se registró recientemente`, 'warning');
+        return;
+      }
+
+      const location = await getFreshLocationForRegistration();
+      if (!location) {
+        showToast(`${detectedPlate} está en el registro, pero no hay una ubicación GPS válida`, 'error');
+        return;
+      }
+
+      await saveMatchedPlateWithLocation(detectedPlate, location);
+      lastRegisteredAtRef.current.set(detectedPlate, Date.now());
+
+      const rule = notificationRulesRef.current[detectedPlate];
+      const savedLocationMessage = '📍 Ubicación guardada';
+      if (globalNotificationsRef.current && rule?.active && rule.message) {
+        showToast(`🔔 ${rule.message}\n${savedLocationMessage}`, 'custom_notification');
+      } else {
+        showToast(`¡${detectedPlate} está en el registro!\n${savedLocationMessage}`, 'warning');
+      }
+    } catch (error) {
+      console.error('Error during scan:', error);
+      if (!automatic) showToast('Error al escanear', 'error');
+    } finally {
+      isProcessingRef.current = false;
     }
   };
 
@@ -133,10 +448,12 @@ export default function HomeScreen() {
 
       if (wasActive && /inactive|background/.test(nextAppState)) {
         void persistZoomIndex(zoomIndexRef.current);
+        stopLocationTracking();
       }
 
       if (isReturningToActive) {
         void restoreSavedZoom(true);
+        if (isScreenFocusedRef.current) void ensureLocationTracking();
       }
 
       appState.current = nextAppState;
@@ -149,153 +466,100 @@ export default function HomeScreen() {
     zoomIndexRef.current = zoomIndex;
   }, [zoomIndex]);
 
+  useEffect(() => {
+    importedPlatesRef.current = importedPlates;
+  }, [importedPlates]);
+
+  useEffect(() => {
+    notificationRulesRef.current = notificationRules;
+  }, [notificationRules]);
+
+  useEffect(() => {
+    globalNotificationsRef.current = globalNotificationsActive;
+  }, [globalNotificationsActive]);
+
+  useEffect(() => {
+    scanModeRef.current = scanMode;
+  }, [scanMode]);
+
   useFocusEffect(
     useCallback(() => {
+      isScreenFocusedRef.current = true;
+      setIsScreenFocused(true);
       void loadNotificationSettings();
       void loadImportedPlates();
       void loadScannedPlates();
+
+      return () => {
+        isScreenFocusedRef.current = false;
+        setIsScreenFocused(false);
+      };
     }, []),
   );
 
-  const loadNotificationSettings = async () => {
-    try {
-      const storedRules = await AsyncStorage.getItem(NOTIFICATION_RULES_STORAGE_KEY);
-      if (storedRules) setNotificationRules(JSON.parse(storedRules));
-
-      const storedGlobal = await AsyncStorage.getItem(GLOBAL_NOTIFICATIONS_KEY);
-      if (storedGlobal !== null) setGlobalNotificationsActive(JSON.parse(storedGlobal));
-    } catch (error) {
-      console.error('Error loading notification settings:', error);
-    }
-  };
-
-  const loadImportedPlates = async () => {
-    const importedStore = parseImportedPlateStore(await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY));
-    setImportedPlates(importedStore);
-  };
-
-  const loadScannedPlates = async () => {
-    try {
-      const platesFile = getPlatesFile();
-      const fileInfo = await platesFile.info();
-      if (!fileInfo.exists) {
-        setScannedPlates([]);
-        return;
-      }
-
-      const importedStore = parseImportedPlateStore(await AsyncStorage.getItem(IMPORTED_PLATES_STORAGE_KEY));
-      const content = await platesFile.text();
-      const platesData = content
-        .split('\n')
-        .filter(Boolean)
-        .slice(1)
-        .map((line) => line.split(',')[0]?.trim().toUpperCase())
-        .filter((plate): plate is string => Boolean(plate))
-        .map((plate) => ({ plate, isInRegistry: plate in importedStore }));
-
-      setScannedPlates(platesData.reverse());
-    } catch (error) {
-      console.error('Error loading scanned plates:', error);
-    }
-  };
-
-  const showToast = (message: string, type: Toast['type']) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-
-    const toastId = Date.now().toString();
-    setToast({ id: toastId, message, type });
-    const duration = type === 'custom_notification' ? 3000 : 1000;
-    toastTimeoutRef.current = setTimeout(() => setToast(null), duration);
-  };
-
-  const savePlate = async (plate: string, isInRegistry: boolean) => {
-    try {
-      const platesFile = getPlatesFile();
-      const now = new Date();
-      const date = now.toLocaleDateString('es-ES');
-      const time = now.toLocaleTimeString('es-ES', { hour12: false });
-      const entry = `${plate},${date},${time},${isInRegistry ? 'EN_REGISTRO' : 'FUERA_REGISTRO'}\n`;
-
-      let currentContent = '';
-      const fileInfo = await platesFile.info();
-      if (fileInfo.exists) {
-        currentContent = await platesFile.text();
-      } else {
-        await platesFile.create();
-        currentContent = 'MATRÍCULA,FECHA,HORA,ESTADO\n';
-      }
-
-      await platesFile.write(currentContent + entry);
-      await loadScannedPlates();
-    } catch (error) {
-      console.error('Error saving plate:', error);
-      showToast('Error al guardar matrícula', 'error');
-    }
-  };
-
-  const handleScan = async () => {
-    if (!cameraRef.current || !cameraReady) {
-      showToast('Cámara no lista', 'error');
+  useEffect(() => {
+    if (!isScreenFocused) {
+      stopLocationTracking();
       return;
     }
 
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.85,
-        base64: false,
-        exif: false,
-        skipProcessing: true,
-      });
+    void ensureLocationTracking();
+    const statusTimer = setInterval(() => void refreshLocationService(), 10_000);
+    return () => {
+      clearInterval(statusTimer);
+      stopLocationTracking();
+    };
+  }, [isScreenFocused]);
 
-      if (!photo.uri) {
-        showToast('Error al capturar la imagen', 'error');
-        return;
-      }
-
-      const result = await TextRecognition.recognize(photo.uri);
-      const cleanText = result.text.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      const plateRegex = /\d{4}[B-DF-HJ-NP-TV-Z]{3}/;
-      const match = cleanText.match(plateRegex);
-
-      if (!match?.[0]) {
-        showToast('No se detectó matrícula válida', 'error');
-        return;
-      }
-
-      const detectedPlate = match[0];
-      const isMatch = detectedPlate in importedPlates;
-
-      if (!isMatch) {
-        showToast(`${detectedPlate} no en registro`, 'success');
-        await savePlate(detectedPlate, false);
-        return;
-      }
-
-      setFrameColor('red');
-      if (Platform.OS !== 'web') {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      }
-
-      const rule = notificationRules[detectedPlate];
-      if (globalNotificationsActive && rule?.active && rule.message) {
-        showToast(`🔔 ${rule.message}`, 'custom_notification');
-      } else {
-        showToast(`¡${detectedPlate} en registro!`, 'warning');
-      }
-
-      setTimeout(() => setFrameColor('blue'), 500);
-      await savePlate(detectedPlate, true);
-    } catch (error) {
-      console.error('Error during scan:', error);
-      showToast('Error al escanear', 'error');
+  useEffect(() => {
+    if (videoIntervalRef.current) {
+      clearInterval(videoIntervalRef.current);
+      videoIntervalRef.current = null;
     }
-  };
+
+    if (scanMode !== 'video' || !isScreenFocused || !cameraReady) return;
+
+    const scanFrame = () => void processCurrentFrame(true);
+    scanFrame();
+    videoIntervalRef.current = setInterval(scanFrame, VIDEO_OCR_INTERVAL_MS);
+
+    return () => {
+      if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+      videoIntervalRef.current = null;
+    };
+  }, [scanMode, isScreenFocused, cameraReady]);
 
   const handleZoomPreset = () => {
     const nextIndex = (zoomIndexRef.current + 1) % ZOOM_PRESETS.length;
     zoomIndexRef.current = nextIndex;
     setZoomIndex(nextIndex);
     void persistZoomIndex(nextIndex);
+  };
+
+  const handleModeChange = (mode: ScanMode) => {
+    setScanMode(mode);
+    scanModeRef.current = mode;
+    if (mode === 'video') void ensureLocationTracking();
+  };
+
+  const getToastBackgroundColor = (type: Toast['type']) => {
+    switch (type) {
+      case 'warning': return '#FF9500';
+      case 'error': return '#FF3B30';
+      case 'custom_notification': return '#5856D6';
+      default: return '#808080';
+    }
+  };
+
+  const getGpsPresentation = () => {
+    switch (gpsStatus) {
+      case 'active': return { label: 'GPS activo', color: '#34C759', icon: 'gps-fixed' as const };
+      case 'permission_denied': return { label: 'GPS sin permiso', color: '#FF3B30', icon: 'location-disabled' as const };
+      case 'services_disabled': return { label: 'GPS desactivado', color: '#FF3B30', icon: 'location-off' as const };
+      case 'waiting': return { label: 'Buscando GPS', color: '#FF9500', icon: 'location-searching' as const };
+      case 'unavailable': return { label: 'GPS no disponible', color: '#FF3B30', icon: 'gps-off' as const };
+      default: return { label: 'Comprobando GPS', color: '#8E8E93', icon: 'location-searching' as const };
+    }
   };
 
   if (hasCameraPermission === null) {
@@ -306,14 +570,7 @@ export default function HomeScreen() {
     return <ScreenContainer className="flex-1 items-center justify-center"><Text>Acceso a la cámara denegado.</Text></ScreenContainer>;
   }
 
-  const getToastBackgroundColor = (type: Toast['type']) => {
-    switch (type) {
-      case 'warning': return '#FF9500';
-      case 'error': return '#FF3B30';
-      case 'custom_notification': return '#5856D6';
-      default: return '#808080';
-    }
-  };
+  const gpsPresentation = getGpsPresentation();
 
   return (
     <ScreenContainer className="flex-1 p-0">
@@ -330,6 +587,11 @@ export default function HomeScreen() {
       <View style={styles.overlayContainer} pointerEvents="box-none">
         <View style={[styles.focusFrame, { borderColor: frameColor === 'blue' ? '#007AFF' : '#FF3B30' }]} pointerEvents="none" />
 
+        <View style={[styles.gpsBadge, { borderColor: gpsPresentation.color }]} pointerEvents="none">
+          <MaterialIcons name={gpsPresentation.icon} size={16} color={gpsPresentation.color} />
+          <Text style={[styles.gpsBadgeText, { color: gpsPresentation.color }]}>{gpsPresentation.label}</Text>
+        </View>
+
         {toast && (
           <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]} pointerEvents="none">
             <Text style={styles.toastText}>{toast.message}</Text>
@@ -337,6 +599,15 @@ export default function HomeScreen() {
         )}
 
         <View style={styles.overlay} pointerEvents="box-none">
+          <View style={styles.modeSelector}>
+            <TouchableOpacity onPress={() => handleModeChange('manual')} style={[styles.modeButton, scanMode === 'manual' && styles.modeButtonActive]}>
+              <Text style={[styles.modeButtonText, scanMode === 'manual' && styles.modeButtonTextActive]}>MANUAL</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => handleModeChange('video')} style={[styles.modeButton, scanMode === 'video' && styles.modeButtonActive]}>
+              <Text style={[styles.modeButtonText, scanMode === 'video' && styles.modeButtonTextActive]}>VÍDEO</Text>
+            </TouchableOpacity>
+          </View>
+
           <View style={styles.scanRow} pointerEvents="box-none">
             <TouchableOpacity
               onPress={() => setIsTorchOn((current) => !current)}
@@ -345,9 +616,16 @@ export default function HomeScreen() {
               <MaterialIcons name={isTorchOn ? 'flash-on' : 'flash-off'} size={24} color={isTorchOn ? '#FFD700' : '#FFFFFF'} />
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.scanButton} onPress={handleScan} disabled={!cameraReady}>
-              <Text style={styles.scanButtonText}>Escanear</Text>
-            </TouchableOpacity>
+            {scanMode === 'manual' ? (
+              <TouchableOpacity style={styles.scanButton} onPress={() => void processCurrentFrame(false)} disabled={!cameraReady}>
+                <Text style={styles.scanButtonText}>Escanear</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.videoScanningStatus}>
+                <View style={styles.videoDot} />
+                <Text style={styles.videoScanningText}>ESCANEANDO</Text>
+              </View>
+            )}
 
             <TouchableOpacity onPress={handleZoomPreset} style={styles.zoomButtonRight}>
               <Text style={styles.zoomButtonText}>{ZOOM_LABELS[zoomIndex]}</Text>
@@ -381,14 +659,24 @@ const styles = StyleSheet.create({
   overlayContainer: { ...StyleSheet.absoluteFillObject, backgroundColor: 'transparent' },
   overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'transparent', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 20 },
   focusFrame: { position: 'absolute', top: '25%', left: '10%', right: '10%', height: 120, borderWidth: 3, borderRadius: 12, backgroundColor: 'transparent' },
-  toast: { position: 'absolute', top: 60, alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, zIndex: 100 },
+  gpsBadge: { position: 'absolute', top: 14, left: 16, flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 9, borderWidth: 1, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 100 },
+  gpsBadgeText: { fontSize: 12, fontWeight: '700' },
+  toast: { position: 'absolute', top: 58, alignSelf: 'center', maxWidth: '86%', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, zIndex: 100 },
   toastText: { color: 'white', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
+  modeSelector: { flexDirection: 'row', marginBottom: 10, borderRadius: 18, padding: 3, backgroundColor: 'rgba(0,0,0,0.62)' },
+  modeButton: { paddingVertical: 7, paddingHorizontal: 17, borderRadius: 15 },
+  modeButtonActive: { backgroundColor: '#007AFF' },
+  modeButtonText: { color: '#D1D1D6', fontSize: 12, fontWeight: '700' },
+  modeButtonTextActive: { color: 'white' },
   scanRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', position: 'relative', marginBottom: 20, height: 60 },
   torchButtonLeft: { position: 'absolute', left: 25, width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', zIndex: 10 },
   zoomButtonRight: { position: 'absolute', right: 25, width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center', zIndex: 10, backgroundColor: 'rgba(0, 0, 0, 0.6)' },
   zoomButtonText: { color: 'white', fontSize: 14, fontWeight: 'bold' },
   scanButton: { backgroundColor: '#007AFF', paddingVertical: 15, paddingHorizontal: 30, borderRadius: 30 },
   scanButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  videoScanningStatus: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 15, paddingHorizontal: 23, borderRadius: 30, backgroundColor: 'rgba(255, 59, 48, 0.9)' },
+  videoDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'white' },
+  videoScanningText: { color: 'white', fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   platesContainer: { backgroundColor: 'rgba(0,0,0,0.7)', width: '90%', maxHeight: 120, borderRadius: 10, padding: 10 },
   platesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   platesTitle: { color: 'white', fontSize: 16, fontWeight: 'bold' },

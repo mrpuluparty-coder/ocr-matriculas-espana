@@ -108,3 +108,12 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Conservar y mostrar todas las matrículas OCR en la pantalla principal.
 - [x] Mostrar en Historial de Ajustes únicamente las detecciones que existan en el CSV importado.
 - [x] Validar TypeScript y bundle Android antes de entregar el cambio.
+
+## GPS y modo Vídeo con OCR controlado — 2026-08-17
+
+- [x] Revisar la integración de ubicación, permisos y el estado actual de cámara/OCR/CSV/zoom.
+- [x] Restaurar únicamente expo-location y los permisos nativos necesarios, sin introducir mapas.
+- [x] Mantener una última posición GPS válida sin guardar un histórico continuo y mostrar su estado en Escáner.
+- [x] Registrar solo coincidencias CSV con coordenadas recientes y aplicar deduplicación temporal de 60 segundos.
+- [x] Añadir selector Manual/Vídeo y OCR aproximado de un fotograma por segundo sin ejecuciones simultáneas.
+- [x] Ejecutar instalación congelada, TypeScript y export Android; no construir APK.

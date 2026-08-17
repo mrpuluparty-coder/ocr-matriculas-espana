@@ -52,7 +52,8 @@ const config: ExpoConfig = {
     bundleIdentifier: env.iosBundleId,
     "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Necesitamos acceso a tu cámara para capturar fotos de matrículas"
+        "NSCameraUsageDescription": "Necesitamos acceso a tu cámara para capturar fotos de matrículas",
+        "NSLocationWhenInUseUsageDescription": "Necesitamos tu ubicación mientras escaneas para registrar coincidencias de matrículas."
       }
   },
   android: {
@@ -65,7 +66,7 @@ const config: ExpoConfig = {
     edgeToEdgeEnabled: true,
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["CAMERA"],
+    permissions: ["CAMERA", "ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
     intentFilters: [
       {
         action: "VIEW",
@@ -116,6 +117,12 @@ const config: ExpoConfig = {
       "expo-camera",
       {
         cameraPermission: "Necesitamos acceso a tu cámara para capturar fotos de matrículas",
+      },
+    ],
+    [
+      "expo-location",
+      {
+        locationWhenInUsePermission: "Necesitamos tu ubicación mientras escaneas para registrar coincidencias de matrículas.",
       },
     ],
     [

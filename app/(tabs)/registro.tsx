@@ -12,6 +12,7 @@ import { ScreenContainer } from '@/components/screen-container';
 const IMPORTED_PLATES_STORAGE_KEY = 'imported_plates';
 const NOTIFICATION_RULES_STORAGE_KEY = 'notification_rules';
 const GLOBAL_NOTIFICATIONS_KEY = 'global_notifications_active';
+const ALL_DETECTIONS_STORAGE_KEY = 'all_scanned_plate_detections';
 const PLATES_FILE_NAME = 'matriculas_detectadas.csv';
 
 const getPlatesFile = () => new File(Paths.document, PLATES_FILE_NAME);
@@ -218,6 +219,7 @@ export default function RegistroScreen() {
         onPress: async () => {
           const platesFile = getPlatesFile();
           if ((await platesFile.info()).exists) await platesFile.delete();
+          await AsyncStorage.removeItem(ALL_DETECTIONS_STORAGE_KEY);
           setScannedPlates([]);
           Alert.alert('Completado', 'Registros OCR eliminados.');
         },
