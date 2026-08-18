@@ -20,7 +20,8 @@ interface NotificationRule {
 interface TimeInputs {
   videoIntervalSeconds: string;
   duplicateWindowSeconds: string;
-  toastDurationSeconds: string;
+  standardToastDurationSeconds: string;
+  customToastDurationSeconds: string;
   gpsUpdateIntervalSeconds: string;
 }
 
@@ -28,7 +29,8 @@ function toTimeInputs(settings: ScannerSettings): TimeInputs {
   return {
     videoIntervalSeconds: String(settings.videoIntervalSeconds),
     duplicateWindowSeconds: String(settings.duplicateWindowSeconds),
-    toastDurationSeconds: String(settings.toastDurationSeconds),
+    standardToastDurationSeconds: String(settings.standardToastDurationSeconds),
+    customToastDurationSeconds: String(settings.customToastDurationSeconds),
     gpsUpdateIntervalSeconds: String(settings.gpsUpdateIntervalSeconds),
   };
 }
@@ -79,7 +81,8 @@ export default function AjustesScreen() {
       const settings = normalizeScannerSettings({
         videoIntervalSeconds: Number(timeInputs.videoIntervalSeconds),
         duplicateWindowSeconds: Number(timeInputs.duplicateWindowSeconds),
-        toastDurationSeconds: Number(timeInputs.toastDurationSeconds),
+        standardToastDurationSeconds: Number(timeInputs.standardToastDurationSeconds),
+        customToastDurationSeconds: Number(timeInputs.customToastDurationSeconds),
         gpsUpdateIntervalSeconds: Number(timeInputs.gpsUpdateIntervalSeconds),
       });
       const saved = await saveScannerSettings(settings);
@@ -152,8 +155,12 @@ export default function AjustesScreen() {
             <TextInput style={styles.timeInput} value={timeInputs.duplicateWindowSeconds} onChangeText={(value) => setTimeInputs((current) => ({ ...current, duplicateWindowSeconds: value }))} keyboardType="decimal-pad" />
           </View>
           <View style={styles.timeField}>
-            <Text style={styles.timeLabel}>Mostrar toast</Text>
-            <TextInput style={styles.timeInput} value={timeInputs.toastDurationSeconds} onChangeText={(value) => setTimeInputs((current) => ({ ...current, toastDurationSeconds: value }))} keyboardType="decimal-pad" />
+            <Text style={styles.timeLabel}>Duración toast estándar</Text>
+            <TextInput style={styles.timeInput} value={timeInputs.standardToastDurationSeconds} onChangeText={(value) => setTimeInputs((current) => ({ ...current, standardToastDurationSeconds: value }))} keyboardType="decimal-pad" />
+          </View>
+          <View style={styles.timeField}>
+            <Text style={styles.timeLabel}>Duración alerta personalizada</Text>
+            <TextInput style={styles.timeInput} value={timeInputs.customToastDurationSeconds} onChangeText={(value) => setTimeInputs((current) => ({ ...current, customToastDurationSeconds: value }))} keyboardType="decimal-pad" />
           </View>
           <View style={styles.timeField}>
             <Text style={styles.timeLabel}>Intervalo de actualización GPS</Text>

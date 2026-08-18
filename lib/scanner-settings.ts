@@ -5,14 +5,16 @@ export const SCANNER_SETTINGS_STORAGE_KEY = 'scanner_operational_settings';
 export interface ScannerSettings {
   videoIntervalSeconds: number;
   duplicateWindowSeconds: number;
-  toastDurationSeconds: number;
+  standardToastDurationSeconds: number;
+  customToastDurationSeconds: number;
   gpsUpdateIntervalSeconds: number;
 }
 
 export const DEFAULT_SCANNER_SETTINGS: ScannerSettings = {
   videoIntervalSeconds: 1,
   duplicateWindowSeconds: 60,
-  toastDurationSeconds: 2.5,
+  standardToastDurationSeconds: 1.5,
+  customToastDurationSeconds: 2.5,
   gpsUpdateIntervalSeconds: 5,
 };
 
@@ -22,11 +24,14 @@ function toValidSeconds(value: unknown, fallback: number) {
 }
 
 export function normalizeScannerSettings(value: unknown): ScannerSettings {
-  const source = value && typeof value === 'object' ? value as Partial<ScannerSettings> : {};
+  const source = value && typeof value === 'object'
+    ? value as Partial<ScannerSettings> & { toastDurationSeconds?: unknown }
+    : {};
   return {
     videoIntervalSeconds: toValidSeconds(source.videoIntervalSeconds, DEFAULT_SCANNER_SETTINGS.videoIntervalSeconds),
     duplicateWindowSeconds: toValidSeconds(source.duplicateWindowSeconds, DEFAULT_SCANNER_SETTINGS.duplicateWindowSeconds),
-    toastDurationSeconds: toValidSeconds(source.toastDurationSeconds, DEFAULT_SCANNER_SETTINGS.toastDurationSeconds),
+    standardToastDurationSeconds: toValidSeconds(source.standardToastDurationSeconds, DEFAULT_SCANNER_SETTINGS.standardToastDurationSeconds),
+    customToastDurationSeconds: toValidSeconds(source.customToastDurationSeconds ?? source.toastDurationSeconds, DEFAULT_SCANNER_SETTINGS.customToastDurationSeconds),
     gpsUpdateIntervalSeconds: toValidSeconds(source.gpsUpdateIntervalSeconds, DEFAULT_SCANNER_SETTINGS.gpsUpdateIntervalSeconds),
   };
 }

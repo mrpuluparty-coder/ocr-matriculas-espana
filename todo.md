@@ -135,3 +135,12 @@ NOTA: estas tareas son historial de la incidencia; no se eliminan al completarse
 - [x] Añadir el intervalo GPS configurable y persistido en Ajustes.
 - [x] Recuperar zoom y cámara sin remount forzado al volver a foreground.
 - [x] Validar TypeScript, bundle Android y escenarios de ciclo de vida.
+
+## Toasts independientes y exportación CSV — 2026-08-17
+
+- [x] Auditar los toasts, la deduplicación y las preferencias actuales.
+- [x] Separar el toast estándar y el personalizado con duraciones independientes.
+- [x] Aplicar deduplicación silenciosa común a Manual y Vídeo, incluidos errores repetidos.
+- [x] Añadir ajustes persistidos de duración estándar y personalizada.
+- [x] Exportar el CSV GPS existente desde Historial mediante compartir nativo.
+- [x] Validar instalación, TypeScript y bundle Android; no generar APK.

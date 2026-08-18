@@ -4,6 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import { File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useFocusEffect } from 'expo-router';
 
@@ -177,6 +178,35 @@ export default function RegistrosScreen() {
     ]);
   };
 
+  const handleExportRecords = async () => {
+    try {
+      const platesFile = getPlatesFile();
+      if (!(await platesFile.info()).exists) {
+        Alert.alert('Exportar registros', 'No hay registros para exportar.');
+        return;
+      }
+
+      const content = await platesFile.text();
+      if (content.split('\n').filter((line) => line.trim() !== '').length <= 1) {
+        Alert.alert('Exportar registros', 'No hay registros para exportar.');
+        return;
+      }
+
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Exportar registros', 'La función de compartir no está disponible en este dispositivo.');
+        return;
+      }
+
+      await Sharing.shareAsync(platesFile.uri, {
+        dialogTitle: 'Exportar registros',
+        mimeType: 'text/csv',
+      });
+    } catch (error) {
+      console.error('Error exporting OCR records:', error);
+      Alert.alert('Exportar registros', 'No se pudieron exportar los registros.');
+    }
+  };
+
   return (
     <ScreenContainer className="flex-1 p-4">
       <ScrollView contentContainerStyle={styles.content}>
@@ -199,11 +229,16 @@ export default function RegistrosScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, styles.sectionTitleInHeader]}>Historial</Text>
-            {scannedPlates.length > 0 && (
-              <TouchableOpacity style={styles.buttonSmall} onPress={handleClearOCR}>
-                <Text style={styles.buttonSmallText}>Eliminar registros</Text>
+            <View style={styles.historyActions}>
+              <TouchableOpacity style={styles.buttonExport} onPress={() => void handleExportRecords()}>
+                <Text style={styles.buttonSmallText}>📤 Exportar</Text>
               </TouchableOpacity>
-            )}
+              {scannedPlates.length > 0 && (
+                <TouchableOpacity style={styles.buttonSmall} onPress={handleClearOCR}>
+                  <Text style={styles.buttonSmallText}>Eliminar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
           <Text style={styles.helpText}>Solo se muestran detecciones que existen en el CSV importado.</Text>
           {scannedPlates.length > 0 ? (
@@ -232,12 +267,14 @@ const styles = StyleSheet.create({
   content: { paddingBottom: 40 },
   section: { marginBottom: 24, backgroundColor: '#fff', padding: 16, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.1, shadowRadius: 2, elevation: 2 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 },
+  historyActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   sectionTitle: { fontSize: 18, fontWeight: 'bold', color: '#11181C', marginBottom: 12 },
   sectionTitleInHeader: { flex: 1, flexShrink: 1, marginBottom: 0 },
   button: { backgroundColor: '#007AFF', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
   buttonDanger: { backgroundColor: '#FF3B30' },
   buttonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   buttonSmall: { flexShrink: 0, backgroundColor: '#FF3B30', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 },
+  buttonExport: { flexShrink: 0, backgroundColor: '#007AFF', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6 },
   buttonSmallText: { color: 'white', fontSize: 12, fontWeight: '600' },
   helpText: { color: '#687076', fontSize: 13, lineHeight: 18, marginBottom: 12 },
   statusText: { fontSize: 14, color: '#22C55E', marginBottom: 12, fontWeight: '500' },

@@ -18,6 +18,7 @@ const NOTIFICATION_RULES_STORAGE_KEY = 'notification_rules';
 const GLOBAL_NOTIFICATIONS_KEY = 'global_notifications_active';
 const ALL_DETECTIONS_STORAGE_KEY = 'all_scanned_plate_detections';
 const RECENT_REGISTRATIONS_STORAGE_KEY = 'recent_matched_plate_registrations';
+const INVALID_OCR_DEDUPLICATION_KEY = '__INVALID_OCR_RESULT__';
 const ZOOM_STORAGE_KEY = 'camera_zoom_index';
 const MATCHED_PLATES_FILE_NAME = 'matriculas_detectadas.csv';
 
@@ -34,10 +35,17 @@ const getMatchedPlatesFile = () => new File(Paths.document, MATCHED_PLATES_FILE_
 type ScanMode = 'manual' | 'video';
 type GpsStatus = 'checking' | 'active' | 'permission_denied' | 'services_disabled' | 'waiting' | 'unavailable';
 
-interface Toast {
+type StandardToastType = 'success' | 'warning' | 'error';
+
+interface StandardToast {
   id: string;
   message: string;
-  type: 'success' | 'warning' | 'error' | 'custom_notification';
+  type: StandardToastType;
+}
+
+interface CustomToast {
+  id: string;
+  message: string;
 }
 
 interface ScannedPlateItem {
@@ -120,7 +128,8 @@ export default function HomeScreen() {
   const [importedPlates, setImportedPlates] = useState<ImportedPlateStore>({});
   const [notificationRules, setNotificationRules] = useState<Record<string, NotificationRule>>({});
   const [globalNotificationsActive, setGlobalNotificationsActive] = useState(true);
-  const [toast, setToast] = useState<Toast | null>(null);
+  const [standardToast, setStandardToast] = useState<StandardToast | null>(null);
+  const [customToast, setCustomToast] = useState<CustomToast | null>(null);
   const [zoomIndex, setZoomIndex] = useState(0);
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('checking');
@@ -130,7 +139,8 @@ export default function HomeScreen() {
   const [scannerSettings, setScannerSettings] = useState<ScannerSettings>(DEFAULT_SCANNER_SETTINGS);
 
   const cameraRef = useRef<CameraView>(null);
-  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const standardToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const customToastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const zoomIndexRef = useRef(0);
   const appState = useRef(AppState.currentState);
   const importedPlatesRef = useRef<ImportedPlateStore>({});
@@ -142,18 +152,26 @@ export default function HomeScreen() {
   const isProcessingRef = useRef(false);
   const latestLocationRef = useRef<Location.LocationObject | null>(null);
   const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
-  const isStartingLocationRef = useRef(false);
-  const videoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastRegisteredAtRef = useRef<Map<string, number>>(new Map());
-  const scannerSettingsRef = useRef<ScannerSettings>(DEFAULT_SCANNER_SETTINGS);
+const isStartingLocationRef = useRef(false);
+const videoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recentDetectionAtRef = useRef<Map<string, number>>(new Map());
+const scannerSettingsRef = useRef<ScannerSettings>(DEFAULT_SCANNER_SETTINGS);
 
-  const showToast = (message: string, type: Toast['type']) => {
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    const toastId = Date.now().toString();
-    setToast({ id: toastId, message, type });
-    const duration = Math.round(scannerSettingsRef.current.toastDurationSeconds * 1_000);
-    toastTimeoutRef.current = setTimeout(() => setToast(null), duration);
-  };
+const showStandardToast = (message: string, type: StandardToastType) => {
+if (standardToastTimeoutRef.current) clearTimeout(standardToastTimeoutRef.current);
+const toastId = Date.now().toString();
+setStandardToast({ id: toastId, message, type });
+    const duration = Math.round(scannerSettingsRef.current.standardToastDurationSeconds * 1_000);
+standardToastTimeoutRef.current = setTimeout(() => setStandardToast(null), duration);
+};
+
+const showCustomToast = (message: string) => {
+if (customToastTimeoutRef.current) clearTimeout(customToastTimeoutRef.current);
+const toastId = `${Date.now()}-custom`;
+setCustomToast({ id: toastId, message });
+    const duration = Math.round(scannerSettingsRef.current.customToastDurationSeconds * 1_000);
+customToastTimeoutRef.current = setTimeout(() => setCustomToast(null), duration);
+};
 
   const persistZoomIndex = async (index: number) => {
     try {
@@ -315,16 +333,22 @@ export default function HomeScreen() {
     setScannerSettings(settings);
   };
 
-  const loadRecentRegistrations = async () => {
+  const loadRecentDetections = async () => {
     try {
       const rawValue = await AsyncStorage.getItem(RECENT_REGISTRATIONS_STORAGE_KEY);
       const stored = rawValue ? JSON.parse(rawValue) : {};
-      if (!stored || typeof stored !== 'object') return;
-      lastRegisteredAtRef.current = new Map(
-        Object.entries(stored).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+      const timestamps = new Map<string, number>(
+        stored && typeof stored === 'object'
+          ? Object.entries(stored).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+          : [],
       );
+      const knownDetections = await readAllDetectedPlates();
+      knownDetections.forEach((entry) => {
+        if (entry.timestamp) timestamps.set(entry.plate, entry.timestamp);
+      });
+      recentDetectionAtRef.current = timestamps;
     } catch (error) {
-      console.error('Error loading recent registrations:', error);
+      console.error('Error loading recent detections:', error);
     }
   };
 
@@ -369,22 +393,17 @@ export default function HomeScreen() {
     }
   };
 
-  const saveDetectionForMainList = async (plate: string) => {
-    const entries = await readAllDetectedPlates();
-    const now = Date.now();
-    const latestSamePlate = [...entries].reverse().find((entry) => entry.plate === plate);
-    const duplicateWindowMs = scannerSettingsRef.current.duplicateWindowSeconds * 1_000;
-    if (latestSamePlate?.timestamp && now - latestSamePlate.timestamp < duplicateWindowMs) return false;
-
-    const nextEntries = [...entries, { plate, timestamp: now }];
-    await AsyncStorage.setItem(ALL_DETECTIONS_STORAGE_KEY, JSON.stringify(nextEntries));
+const saveDetectionForMainList = async (plate: string) => {
+const entries = await readAllDetectedPlates();
+const now = Date.now();
+const nextEntries = [...entries, { plate, timestamp: now }];
+await AsyncStorage.setItem(ALL_DETECTIONS_STORAGE_KEY, JSON.stringify(nextEntries));
     setScannedPlates(
       nextEntries
-        .map((entry) => ({ plate: entry.plate, isInRegistry: entry.plate in importedPlatesRef.current }))
-        .reverse(),
-    );
-    return true;
-  };
+.map((entry) => ({ plate: entry.plate, isInRegistry: entry.plate in importedPlatesRef.current }))
+.reverse(),
+);
+};
 
   const saveMatchedPlateWithLocation = async (plate: string, location: Location.LocationObject) => {
     const matchedFile = getMatchedPlatesFile();
@@ -405,18 +424,20 @@ export default function HomeScreen() {
     await matchedFile.write(currentContent + entry);
   };
 
-  const isRecentlyRegistered = (plate: string) => {
-    const lastRegisteredAt = lastRegisteredAtRef.current.get(plate);
-    return lastRegisteredAt !== undefined && Date.now() - lastRegisteredAt < scannerSettingsRef.current.duplicateWindowSeconds * 1_000;
+  const isRecentlyDetected = (key: string) => {
+    const lastDetectedAt = recentDetectionAtRef.current.get(key);
+    return lastDetectedAt !== undefined && Date.now() - lastDetectedAt < scannerSettingsRef.current.duplicateWindowSeconds * 1_000;
   };
 
-  const rememberRegistration = async (plate: string) => {
+  const registerNewDetection = async (key: string) => {
+    if (isRecentlyDetected(key)) return false;
     const now = Date.now();
-    lastRegisteredAtRef.current.set(plate, now);
+    recentDetectionAtRef.current.set(key, now);
     await AsyncStorage.setItem(
       RECENT_REGISTRATIONS_STORAGE_KEY,
-      JSON.stringify(Object.fromEntries(lastRegisteredAtRef.current.entries())),
+      JSON.stringify(Object.fromEntries(recentDetectionAtRef.current.entries())),
     );
+    return true;
   };
 
   const processCurrentFrame = async (automatic: boolean) => {
@@ -431,33 +452,40 @@ export default function HomeScreen() {
         skipProcessing: true,
       });
 
-      if (!photo.uri) {
-        if (!automatic) showToast('Error al capturar la imagen', 'error');
-        return;
-      }
+if (!photo.uri) {
+        if (await registerNewDetection(INVALID_OCR_DEDUPLICATION_KEY)) showStandardToast('No se detectó matrícula válida', 'error');
+return;
+}
 
       const result = await TextRecognition.recognize(photo.uri);
       if (!isAppActiveRef.current || !isScreenFocusedRef.current || (automatic && scanModeRef.current !== 'video')) return;
 
       const cleanText = result.text.replace(/[^A-Z0-9]/gi, '').toUpperCase();
-      const match = cleanText.match(/\d{4}[B-DF-HJ-NP-TV-Z]{3}/);
-      if (!match?.[0]) {
-        if (!automatic) showToast('No se detectó matrícula válida', 'error');
-        return;
-      }
+const match = cleanText.match(/\d{4}[B-DF-HJ-NP-TV-Z]{3}/);
+if (!match?.[0]) {
+        if (await registerNewDetection(INVALID_OCR_DEDUPLICATION_KEY)) showStandardToast('No se detectó matrícula válida', 'error');
+return;
+}
 
       const detectedPlate = match[0];
+      if (!(await registerNewDetection(detectedPlate))) return;
+      if (recentDetectionAtRef.current.delete(INVALID_OCR_DEDUPLICATION_KEY)) {
+        await AsyncStorage.setItem(
+          RECENT_REGISTRATIONS_STORAGE_KEY,
+          JSON.stringify(Object.fromEntries(recentDetectionAtRef.current.entries())),
+        );
+      }
       await saveDetectionForMainList(detectedPlate);
       const rule = notificationRulesRef.current[detectedPlate];
       const hasCustomAlert = Boolean(globalNotificationsRef.current && rule?.active && rule.message);
       const showCustomAlert = (locationSaved = false) => {
         const suffix = locationSaved ? '\n📍 Ubicación guardada' : '';
-        showToast(`🔔 ${rule?.message}${suffix}`, 'custom_notification');
+        showCustomToast(`🔔 ${rule?.message}${suffix}`);
       };
 
       if (!(detectedPlate in importedPlatesRef.current)) {
+        showStandardToast(`${detectedPlate} sin registro`, 'success');
         if (hasCustomAlert) showCustomAlert();
-        else if (!automatic) showToast(`${detectedPlate} no en registro`, 'success');
         return;
       }
 
@@ -465,30 +493,22 @@ export default function HomeScreen() {
       if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setTimeout(() => setFrameColor('blue'), 500);
 
-      if (isRecentlyRegistered(detectedPlate)) {
-        if (hasCustomAlert) showCustomAlert();
-        else if (!automatic) showToast(`${detectedPlate} ya se registró recientemente`, 'warning');
-        return;
-      }
-
-      const location = await getFreshLocationForRegistration();
+const location = await getFreshLocationForRegistration();
       if (!location) {
+        showStandardToast(`${detectedPlate} está en el registro!`, 'warning');
         if (hasCustomAlert) showCustomAlert();
-        else showToast(`${detectedPlate} está en el registro, pero no hay una ubicación GPS válida`, 'error');
         return;
       }
 
       await saveMatchedPlateWithLocation(detectedPlate, location);
-      await rememberRegistration(detectedPlate);
 
+      showStandardToast(`¡${detectedPlate} está en el registro!\n📍 Ubicación guardada`, 'warning');
       if (hasCustomAlert) {
         showCustomAlert(true);
-      } else {
-        showToast(`¡${detectedPlate} está en el registro!\n📍 Ubicación guardada`, 'warning');
       }
-    } catch (error) {
-      console.error('Error during scan:', error);
-      if (!automatic) showToast('Error al escanear', 'error');
+} catch (error) {
+console.error('Error during scan:', error);
+      if (await registerNewDetection(INVALID_OCR_DEDUPLICATION_KEY)) showStandardToast('No se detectó matrícula válida', 'error');
     } finally {
       isProcessingRef.current = false;
     }
@@ -558,10 +578,10 @@ export default function HomeScreen() {
     useCallback(() => {
       isScreenFocusedRef.current = true;
       setIsScreenFocused(true);
-      void loadNotificationSettings();
-      void loadOperationalSettings();
-      void loadRecentRegistrations();
-      void loadImportedPlates();
+void loadNotificationSettings();
+void loadOperationalSettings();
+      void loadRecentDetections();
+void loadImportedPlates();
       void loadScannedPlates();
 
       return () => {
@@ -617,11 +637,10 @@ export default function HomeScreen() {
     if (mode === 'video') void ensureLocationTracking();
   };
 
-  const getToastBackgroundColor = (type: Toast['type']) => {
+  const getStandardToastBackgroundColor = (type: StandardToastType) => {
     switch (type) {
       case 'warning': return '#FF9500';
-      case 'error': return '#FF3B30';
-      case 'custom_notification': return '#5856D6';
+      case 'error': return '#000000';
       default: return '#808080';
     }
   };
@@ -671,9 +690,14 @@ export default function HomeScreen() {
         </View>
         <Text style={styles.versionLabel} pointerEvents="none">v{APP_VERSION}</Text>
 
-        {toast && (
-          <View style={[styles.toast, { backgroundColor: getToastBackgroundColor(toast.type) }]} pointerEvents="none">
-            <Text style={styles.toastText}>{toast.message}</Text>
+        {standardToast && (
+          <View style={[styles.standardToast, { backgroundColor: getStandardToastBackgroundColor(standardToast.type) }]} pointerEvents="none">
+            <Text style={styles.toastText}>{standardToast.message}</Text>
+          </View>
+        )}
+        {customToast && (
+          <View style={styles.customToast} pointerEvents="none">
+            <Text style={styles.toastText}>{customToast.message}</Text>
           </View>
         )}
 
@@ -741,7 +765,8 @@ const styles = StyleSheet.create({
   gpsBadge: { position: 'absolute', top: 14, left: 16, flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 9, borderWidth: 1, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 100 },
   gpsBadgeText: { fontSize: 12, fontWeight: '700' },
   versionLabel: { position: 'absolute', top: 20, right: 16, color: 'white', fontSize: 12, fontWeight: '600', opacity: 0.4 },
-  toast: { position: 'absolute', top: 58, alignSelf: 'center', maxWidth: '86%', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, zIndex: 100 },
+  standardToast: { position: 'absolute', top: 58, alignSelf: 'center', maxWidth: '86%', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, zIndex: 100 },
+  customToast: { position: 'absolute', top: 116, alignSelf: 'center', maxWidth: '86%', paddingVertical: 10, paddingHorizontal: 20, borderRadius: 20, zIndex: 101, backgroundColor: '#FF3B30' },
   toastText: { color: 'white', fontSize: 16, fontWeight: 'bold', textAlign: 'center' },
   modeSelector: { flexDirection: 'row', marginBottom: 10, borderRadius: 18, padding: 3, backgroundColor: 'rgba(0,0,0,0.62)' },
   modeButton: { paddingVertical: 7, paddingHorizontal: 17, borderRadius: 15 },
